@@ -95,4 +95,4 @@ You can select the default desired agent in [`config.yaml`](`python_examples/aut
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 # Contributors
-Dat Nguyen, Moksh Jain, Yichao Liang, Archana Warrier, Michelanego Naim, Cambridge Yang, Zenna Tarvares
+Dat Nguyen, Moksh Jain, Yichao Liang, Archana Warrier, Michelangelo Naim, Cambridge Yang, Zenna Tavares
