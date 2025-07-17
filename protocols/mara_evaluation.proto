@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package mara;
+
+import "mara_environment.proto";
+import "mara_agent.proto";
+
+// Evaluation service definitions
+service MARAEvaluation {
+  // Start a new evaluation
+  rpc StartEvaluation(StartEvaluationRequest) returns (StartEvaluationResponse);
+  
+  // Get evaluation status
+  rpc GetEvaluationStatus(EvaluationStatusRequest) returns (EvaluationStatusResponse);
+  
+  // Stop an ongoing evaluation
+  rpc StopEvaluation(StopEvaluationRequest) returns (StopEvaluationResponse);
+  
+  // Get evaluation results
+  rpc GetEvaluationResults(EvaluationResultsRequest) returns (EvaluationResultsResponse);
+}
+
+// Evaluation configuration
+message EvaluationConfig {
+  string name = 1;
+  string description = 2;
+  string environment_id = 3;
+  string agent_id = 4;
+  int32 num_episodes = 5;
+  int32 max_steps_per_episode = 6;
+  double timeout_per_episode = 7;
+  map<string, string> environment_config = 8;
+  map<string, string> agent_config = 9;
+  map<string, string> metrics_config = 10;
+}
+
+// Messages for evaluation requests/responses
+message StartEvaluationRequest {
+  EvaluationConfig config = 1;
+}
+
+message StartEvaluationResponse {
+  bool success = 1;
+  string message = 2;
+  string evaluation_id = 3;
+}
+
+message EvaluationStatusRequest {
+  string evaluation_id = 1;
+}
+
+message EvaluationStatusResponse {
+  enum Status {
+    PENDING = 0;
+    RUNNING = 1;
+    COMPLETED = 2;
+    FAILED = 3;
+    STOPPED = 4;
+  }
+  
+  Status status = 1;
+  double progress = 2;  // 0.0 to 1.0
+  int32 episodes_completed = 3;
+  int32 episodes_total = 4;
+  string message = 5;
+}
+
+message StopEvaluationRequest {
+  string evaluation_id = 1;
+}
+
+message StopEvaluationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message EvaluationResultsRequest {
+  string evaluation_id = 1;
+}
+
+message EpisodeResult {
+  int32 episode_number = 1;
+  double total_reward = 2;
+  int32 num_steps = 3;
+  bool success = 4;
+  map<string, double> metrics = 5;
+}
+
+message EvaluationResultsResponse {
+  string evaluation_id = 1;
+  string environment_id = 2;
+  string agent_id = 3;
+  repeated EpisodeResult episode_results = 4;
+  map<string, double> aggregate_metrics = 5;
+  bytes detailed_results = 6;  // Could be JSON or other serialized format
+}

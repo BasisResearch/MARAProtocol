@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package mara;
+
+import "mara_environment.proto";
+
+// Registry service for environment discovery
+service MARARegistry {
+  rpc RegisterEnvironment(RegisterEnvironmentRequest) returns (RegisterEnvironmentResponse);
+  rpc GetEnvironment(GetEnvironmentRequest) returns (GetEnvironmentResponse);
+  rpc ListEnvironments(ListEnvironmentsRequest) returns (ListEnvironmentsResponse);
+}
+
+message RegisterEnvironmentRequest {
+  string environment_id = 1;
+  string version = 2;
+  EnvironmentType env_type = 3;
+  string endpoint = 4;
+  map<string, string> metadata = 5;
+  map<string, string> capabilities = 6;
+}
+
+message RegisterEnvironmentResponse {
+  bool success = 1;
+  string message = 2;
+  string environment_id = 3;
+}
+
+message GetEnvironmentRequest {
+  string environment_id = 1;
+}
+
+message GetEnvironmentResponse {
+  string environment_id = 1;
+  string version = 2;
+  EnvironmentType env_type = 3;
+  string endpoint = 4;
+  map<string, string> metadata = 5;
+  map<string, string> capabilities = 6;
+}
+
+message ListEnvironmentsRequest {
+  string filter = 1;
+}
+
+message ListEnvironmentsResponse {
+  repeated GetEnvironmentResponse environments = 1;
+}

@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package mara;
+
+// Observation data
+/*
+ * If it's a hint, have to be enumeration? Can just be text.
+ * Other than that, how can specify a tree, graph?
+ * How want to force implementation to follow this interface
+ */
+message Observation {
+  optional string text_data = 1;  // For text observations
+  optional bytes image_data = 2;  // For image observations
+}
+
+/*
+ * Can we have a new protofile for each environment?
+ * That reuse existing baseclasses?
+ */
+message DiscreteActions {
+  repeated int32 discrete_actions = 1; // For discrete action spaces
+}
+
+// Action data
+/*
+ * This is also dynamic.
+ * Whether should have static action space or dynamic action space?
+ * Or just keyboard and mouse (low-level action)?
+ * Static environment
+ * Evaluation changes.
+ */
+message Action {
+  oneof action_data {
+    string text_data = 1;                 // For text actions
+    DiscreteActions discrete_actions = 2; // For discrete action spaces
+  }
+}
+
+// Environment types
+enum EnvironmentType {
+  TIME_DEPENDENT = 0;
+  REACTIVE = 1; // Should be changed to action-driven
+}
+/*
+ * What information would reflect
+ * What is the difference between reactive and time-dependent?
+ * What information providing can make the difference?
+ * Has to avoid favoring faster computer.
+ * Or keep sending NOP.
+ * Is it just framerate info?
+ *   Whether we allow the agent to control the framerate?
+ */
+
+// Reactive environment definition
+message ReactiveEnvironment {
+  // Environment metadata
+  string environment_id = 1;
+  string version = 2;
+  map<string, string> metadata = 3;
+
+  // State space definition
+  message StateSpace {
+    repeated string dimensions = 1;
+    map<string, string> constraints = 2;
+  }
+
+  // State-dependent action space definition
+  message ActionSpace {
+    repeated Action available_actions = 1;
+    map<string, string> constraints = 2;
+    bool is_continuous = 3;
+  }
+
+  // Observation space definition
+  message ObservationSpace {
+    repeated string dimensions = 1;
+    repeated string modalities = 2;
+    map<string, string> metadata = 3;
+  }
+
+  // Query for available actions
+  message ActionSpaceQuery { bytes current_state = 1; }
+
+  message ActionSpaceResponse { ActionSpace action_space = 1; }
+}
+
+// Time-dependent environment definition
+message TimeDependentEnvironment {
+  // Environment metadata
+  string environment_id = 1;
+  string version = 2;
+  map<string, string> metadata = 3;
+
+  // More fields (similar to ReactiveEnvironment but with time components)
+  message TimeDependentStateSpace {
+    repeated string dimensions = 1;
+    map<string, string> constraints = 2;
+    double time_step = 3; // Time step for the environment
+  }
+
+  message TimeDependentActionSpace {
+    repeated Action available_actions = 1;
+    map<string, string> constraints = 2;
+    bool is_continuous = 3;
+    double time_step = 4; // Time step for the environment
+  }
+
+  message TimeDependentObservationSpace {
+    repeated string dimensions = 1;
+    repeated string modalities = 2;
+    map<string, string> metadata = 3;
+    double time_step = 4; // Time step for the environment
+  }
+
+  // Query for available actions
+  message SpaceQuery {
+    bytes current_state = 1;
+    double current_time = 2; // Current time in the environment
+  }
+
+  message SpaceResponse {
+    TimeDependentActionSpace action_space = 1;
+    TimeDependentObservationSpace observation_space = 2;
+  }
+}

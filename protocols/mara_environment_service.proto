@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package mara;
+
+import "mara_environment.proto";
+
+// Core environment protocol definitions
+service MARAEnvironment {
+  // Initialize environment with configuration
+  rpc Initialize(InitializeRequest) returns (InitializeResponse);
+
+  // Reset environment to initial state
+  rpc Reset(ResetRequest) returns (ResetResponse);
+
+  // Get environment metadata and capabilities
+  rpc GetEnvironmentInfo(EnvironmentInfoRequest)
+      returns (EnvironmentInfoResponse);
+
+  // Take a step in the environment with an action
+  rpc Step(StepRequest) returns (StepResponse);
+
+  // Query action and observation spaces
+  rpc QuerySpaces(SpaceQueryRequest) returns (SpaceQueryResponse);
+
+  // Close environment and free resources
+  rpc Close(CloseRequest) returns (CloseResponse);
+}
+
+// Request/Response messages for environment interaction
+message InitializeRequest {
+  EnvironmentType env_type = 1;
+  map<string, string> config = 2;
+}
+
+message InitializeResponse {
+  bool success = 1;
+  string message = 2;
+  oneof env_specific {
+    TimeDependentEnvironment time_dependent_env = 3;
+    ReactiveEnvironment reactive_env = 4;
+  }
+}
+
+message ResetRequest { map<string, string> config = 1; }
+
+message ResetResponse {
+  Observation initial_observation = 1;
+  map<string, string> info = 2;
+}
+
+message EnvironmentInfoRequest {}
+
+message EnvironmentInfoResponse {
+  string environment_id = 1;
+  string version = 2;
+  EnvironmentType env_type = 3;
+  map<string, string> capabilities = 4;
+  map<string, string> metadata = 5;
+}
+
+message StepRequest {
+  Action action = 1;
+  double time_delta = 2; // Only used for time-dependent environments
+}
+
+message StepResponse {
+  Observation observation = 1;
+  double reward = 2;
+  bool is_terminal = 3;
+  map<string, string> info = 4;
+  double current_time = 5; // Only used for time-dependent environments
+}
+
+message SpaceQueryRequest {
+  oneof query_type {
+    ReactiveEnvironment.ActionSpaceQuery reactive_query = 1;
+    TimeDependentEnvironment.SpaceQuery time_dependent_query = 2;
+  }
+}
+
+message SpaceQueryResponse {
+  oneof response_type {
+    ReactiveEnvironment.ActionSpaceResponse reactive_response = 1;
+    TimeDependentEnvironment.SpaceResponse time_dependent_response = 2;
+  }
+}
+
+message CloseRequest {}
+
+message CloseResponse {
+  bool success = 1;
+  string message = 2;
+}

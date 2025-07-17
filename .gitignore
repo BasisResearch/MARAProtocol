@@ -1,0 +1,9 @@
+*__pycache__*
+*.env
+logs
+experiments
+generated/
+.DS_Store
+log_environment_interfaces*
+AutumnBenchmark
+log

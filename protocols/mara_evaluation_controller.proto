@@ -1,0 +1,101 @@
+// mara_evaluation_controller.proto
+syntax = "proto3";
+
+package mara;
+
+import "mara_environment.proto";
+import "mara_agent.proto";
+
+// The Evaluation Controller Service
+service MARAEvaluationController {
+  // Initialize the evaluation controller
+  rpc Initialize(ControllerInitializeRequest) returns (ControllerInitializeResponse);
+  
+  // Start or continue evaluation across environments
+  rpc RunEvaluation(RunEvaluationRequest) returns (RunEvaluationResponse);
+  
+  // Get the current state of the evaluation
+  rpc GetEvaluationState(EvaluationStateRequest) returns (EvaluationStateResponse);
+  
+  // Transition between environments
+  rpc TransitionEnvironment(TransitionRequest) returns (TransitionResponse);
+  
+  // Calculate aggregate rewards
+  rpc CalculateRewards(CalculateRewardsRequest) returns (CalculateRewardsResponse);
+}
+
+// Environment transition definition
+message EnvironmentTransition {
+  string from_environment_id = 1;
+  string to_environment_id = 2;
+  string transition_condition = 3;
+  string transition_message = 4;
+}
+
+// Controller initialization
+message ControllerInitializeRequest {
+  repeated string environment_ids = 1;
+  repeated EnvironmentTransition transitions = 2;
+  string agent_id = 3;
+  map<string, string> config = 4;
+}
+
+message ControllerInitializeResponse {
+  bool success = 1;
+  string controller_id = 2;
+  string message = 3;
+}
+
+// Evaluation running
+message RunEvaluationRequest {
+  string controller_id = 1;
+  bool reset = 2;
+  int32 max_transitions = 3;
+  double timeout = 4;
+}
+
+message RunEvaluationResponse {
+  bool success = 1;
+  string message = 2;
+  double aggregate_reward = 3;
+  map<string, double> environment_rewards = 4;
+  repeated string environments_visited = 5;
+  bool evaluation_complete = 6;
+}
+
+// Evaluation state
+message EvaluationStateRequest {
+  string controller_id = 1;
+}
+
+message EvaluationStateResponse {
+  string current_environment_id = 1;
+  map<string, double> rewards_so_far = 2;
+  repeated string environment_sequence = 3;
+  double aggregate_reward = 4;
+  bool evaluation_complete = 5;
+}
+
+// Environment transition
+message TransitionRequest {
+  string controller_id = 1;
+  string from_environment_id = 2;
+  string to_environment_id = 3;
+  map<string, string> transition_data = 4;
+}
+
+message TransitionResponse {
+  bool success = 1;
+  string message = 2;
+  string transition_message = 3;
+}
+
+// Reward calculation
+message CalculateRewardsRequest {
+  string controller_id = 1;
+  map<string, double> environment_rewards = 2;
+}
+
+message CalculateRewardsResponse {
+  double aggregate_reward = 1;
+}

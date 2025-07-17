@@ -1,0 +1,5 @@
+{
+  "type": "defect_detection",
+  "program": "ice",
+  "wrong_program": "ice_wrong"
+}

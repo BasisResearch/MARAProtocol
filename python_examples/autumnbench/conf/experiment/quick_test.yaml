@@ -1,0 +1,7 @@
+# @package _global_
+# Quick test experiment configuration
+
+# Override defaults for faster testing
+per_env_max_steps: 10
+max_history_length: 5
+output_csv: "quick_test_results.csv"

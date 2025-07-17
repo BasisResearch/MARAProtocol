@@ -1,0 +1,44 @@
+# Default configuration for MARA evaluation
+
+# Required parameters
+output_csv: "results.csv"
+
+data_dir: "./python_examples/autumnbench/example_benchmark"
+
+# Model configuration
+llm_provider: "openrouter"
+model: "google/gemini-2.5-flash-preview-05-20"
+
+# Agent configuration
+# agent: "autumn_llm_unified_interactive_agent_v1" # LLM-based agent
+# agent: "autumn_random_interactive_agent_v1" # Random agent
+agent: "autumn_simple_wm_agent" # Oracle autumnSynth agent
+
+use_scratchpad: true
+instruction_type: "reflection"
+hint: true
+
+# Oracle autumnSynth agent parameters
+use_oracle_interpreter_seed: True
+
+logging_path: "./logs"
+
+max_history_length: -1 
+stack_frames: 0
+skip_frames: false
+per_env_max_steps: 100
+render_mode: "text"
+
+# task_name: "mfp" # mfp, dd, planning
+task_name: "dd" # mfp, dd, planning
+envs: [
+    "ice",
+]
+
+exp_name: "full_evaluation"
+
+hydra:
+  job:
+    chdir: true
+  run:
+    dir: ./experiments/${exp_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}

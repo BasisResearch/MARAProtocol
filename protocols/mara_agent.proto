@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+package mara;
+
+import "mara_environment.proto";
+
+// Agent types
+enum AgentType {
+  POLICY = 0;   // Agent that follows a fixed policy
+  LEARNING = 1; // Agent that learns during interaction
+  PLANNING = 2; // Agent that plans ahead using a model
+  HYBRID = 3;   // Agent combining multiple approaches
+}
+
+// Core agent protocol definition
+service MARAAgent {
+  // Initialize agent with configuration
+  rpc Initialize(AgentInitializeRequest) returns (AgentInitializeResponse);
+
+  // Reset agent for a new episode
+  rpc Reset(AgentResetRequest) returns (AgentResetResponse);
+
+  // Get agent's action based on observation
+  rpc Act(ActRequest) returns (ActResponse);
+
+  // Provide feedback to agent after each step
+  rpc Feedback(FeedbackRequest) returns (FeedbackResponse);
+
+  // Notify agent of episode completion
+  rpc EndEpisode(EndEpisodeRequest) returns (EndEpisodeResponse);
+
+  // Get agent metadata and capabilities
+  rpc GetAgentInfo(AgentInfoRequest) returns (AgentInfoResponse);
+
+  // Close agent and free resources
+  rpc Close(AgentCloseRequest) returns (AgentCloseResponse);
+}
+
+// Messages for agent initialization
+message AgentInitializeRequest {
+  AgentType agent_type = 1;
+  string environment_id = 2;
+  EnvironmentType environment_type = 3;
+
+  // Environment-specific information
+  oneof env_specific {
+    ReactiveEnvironment.ObservationSpace reactive_observation_space = 4;
+    TimeDependentEnvironment.TimeDependentObservationSpace
+        time_dependent_observation_space = 5;
+  }
+
+  map<string, string> config = 10;
+}
+
+message AgentInitializeResponse {
+  bool success = 1;
+  string message = 2;
+  string agent_id = 3;
+  map<string, string> capabilities = 4;
+}
+
+// Messages for agent reset
+message AgentResetRequest {
+  Observation initial_observation = 1;
+  map<string, string> info = 2;
+}
+
+message AgentResetResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Messages for action selection
+message ActRequest {
+  Observation observation = 1;
+  oneof action_space {
+    ReactiveEnvironment.ActionSpace reactive_action_space = 2;
+    TimeDependentEnvironment.TimeDependentActionSpace
+        time_dependent_action_space = 3;
+  }
+  double time_budget = 4; // Optional time constraint for action selection
+  map<string, string> metadata = 5;
+}
+
+message ActResponse {
+  Action action = 1;
+  double confidence = 2; // Optional confidence level (0-1)
+  map<string, string> metadata = 3;
+}
+
+// Messages for feedback
+message FeedbackRequest {
+  Observation previous_observation = 1;
+  Action action = 2;
+  Observation current_observation = 3;
+  double reward = 4;
+  bool is_terminal = 5;
+  map<string, string> info = 6;
+}
+
+message FeedbackResponse { bool acknowledged = 1; }
+
+// Messages for episode completion
+message EndEpisodeRequest {
+  double total_reward = 1;
+  int32 num_steps = 2;
+  bool success = 3;
+  map<string, string> metrics = 4;
+}
+
+message EndEpisodeResponse { bool acknowledged = 1; }
+
+// Messages for agent information
+message AgentInfoRequest {}
+
+message AgentInfoResponse {
+  string agent_id = 1;
+  string version = 2;
+  AgentType agent_type = 3;
+  repeated string compatible_environment_types = 4;
+  map<string, string> capabilities = 5;
+  map<string, string> metadata = 6;
+}
+
+// Messages for agent closure
+message AgentCloseRequest {}
+
+message AgentCloseResponse {
+  bool success = 1;
+  string message = 2;
+}
