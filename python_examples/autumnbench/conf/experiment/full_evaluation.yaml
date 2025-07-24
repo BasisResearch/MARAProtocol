@@ -2,7 +2,7 @@
 # Full evaluation experiment configuration
 
 # Full evaluation parameters
-per_env_max_steps: 200
+max_interaction_steps: 200
 max_history_length: -1  # No limit
 stack_frames: 5
 output_csv: "full_evaluation_results.csv"

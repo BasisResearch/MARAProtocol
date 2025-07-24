@@ -276,8 +276,8 @@ class EvaluationControllerNoServer:
                         env_id, {
                             "env_name":
                             "_".join(env_id.split("_")[:-2]),
-                            "per_env_max_steps":
-                            str(self.config.get("per_env_max_steps", 25)),
+                            "max_interaction_steps":
+                            str(self.config.get("max_interaction_steps", 25)),
                             "stack_frames":
                             str(self.config.get("stack_frames", 0)),
                             "skip_frames":
@@ -684,7 +684,7 @@ class EvaluationController:
             )
             reward, terminal_condition, final_state = self.run_environment(
                 env_id, self.agents[self.config.get(
-                    "agent", "autumn_llm_interactive_agent_v1")])
+                    "agent", "autumn_llm_interactive_agent_v1")], max_steps=self.config.get("max_steps", 301))
             logger.info(
                 f"Environment run complete. Reward: {reward}, Terminal condition: {terminal_condition}"
             )
@@ -803,7 +803,7 @@ class EvaluationController:
                         config=self.configs.get(
                             env_id, {
                                 "env_name": "_".join(env_id.split("_")[:-2]),
-                                "per_env_max_steps": "100"
+                                "max_interaction_steps": "100"
                             })),
                     timeout=10)
                 logger.info(f"Environment initialized: {env_init.message}")

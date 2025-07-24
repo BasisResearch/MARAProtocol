@@ -221,7 +221,7 @@ class MARACompositeAutumnChangeDetectionServicer(env_grpc.MARAEnvironmentService
 
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
         self.env_name = request.config["env_name"]
-        self.per_env_max_steps = int(request.config["per_env_max_steps"])
+        self.max_interaction_steps = int(request.config["max_interaction_steps"])
         self.seed = request.config["seed"]
         self.data_dir = request.config["data_dir"]
         self.render_mode = request.config["render_mode"]
@@ -260,7 +260,7 @@ class MARACompositeAutumnChangeDetectionServicer(env_grpc.MARAEnvironmentService
             if is_terminal:
                 self.transiting = "Transition"
                 step_response.is_terminal = False
-            elif self.steps >= self.per_env_max_steps:
+            elif self.steps >= self.max_interaction_steps:
                 self.transiting = "Transition"
                 step_response.is_terminal = False
                 self.steps = 0
@@ -309,7 +309,7 @@ class MARACompositeAutumnPlanningServicer(env_grpc.MARAEnvironmentServicer):
 
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
         self.env_name = request.config["env_name"]
-        self.per_env_max_steps = int(request.config["per_env_max_steps"])
+        self.max_interaction_steps = int(request.config["max_interaction_steps"])
         self.seed = request.config["seed"]
         self.data_dir = request.config["data_dir"]
         self.render_mode = request.config["render_mode"]
@@ -348,7 +348,7 @@ class MARACompositeAutumnPlanningServicer(env_grpc.MARAEnvironmentServicer):
             if is_terminal:
                 self.transiting = "Transition"
                 step_response.is_terminal = False
-            elif self.steps >= self.per_env_max_steps:
+            elif self.steps >= self.max_interaction_steps:
                 self.transiting = "Transition"
                 step_response.is_terminal = False
                 self.steps = 0
@@ -377,7 +377,7 @@ class MARACompositeAutumnPlanningServicer(env_grpc.MARAEnvironmentServicer):
                 step_response.is_terminal = True
             # Commenting out to allow the max_steps during evaluation to be 
             # handled by the evaluation_controller run_environment
-            # elif self.steps >= self.per_env_max_steps:
+            # elif self.steps >= self.max_interaction_steps:
             #     self.transiting = "End"
             #     step_response.is_terminal = True
             #     self.steps = 0

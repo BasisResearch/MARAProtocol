@@ -63,7 +63,7 @@ def run_multi_environment_evaluation(cfg: DictConfig):
             "max_history_length": cfg.max_history_length,
             "stack_frames": cfg.stack_frames,
             "skip_frames": cfg.skip_frames,
-            "per_env_max_steps": cfg.per_env_max_steps,
+            "max_interaction_steps": cfg.max_interaction_steps,
             "render_mode": cfg.render_mode,
             "seed": cfg.seed,
             "data_dir": cfg.data_dir,

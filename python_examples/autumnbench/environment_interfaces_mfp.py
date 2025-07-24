@@ -73,7 +73,7 @@ class MARACompositeAutumnMFPServicer(MARAInteractiveServicer):
 
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
         self.env_name = request.config["env_name"]
-        self.per_env_max_steps = int(request.config["per_env_max_steps"])
+        self.max_interaction_steps = int(request.config["max_interaction_steps"])
         self.render_mode = request.config["render_mode"]
         self.data_dir = request.config["data_dir"]
         self.logging_path = request.config["logging_path"]
@@ -96,7 +96,7 @@ class MARACompositeAutumnMFPServicer(MARAInteractiveServicer):
                 self.transiting_state = "Transition"
                 step_response.is_terminal = False
                 self.steps = 0
-            elif self.steps >= self.per_env_max_steps:
+            elif self.steps >= self.max_interaction_steps:
                 self.current_environment = self.mfp_environment
                 self.transiting_state = "Transition"
                 step_response.is_terminal = False
