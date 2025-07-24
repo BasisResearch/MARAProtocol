@@ -658,7 +658,7 @@ class MARAMFPEnvironment:
         # If not finished
         actions = ["step"]
         if self.is_finished:
-            choices = self.get_choices(self.current_question)
+            choices = self.get_choices()
             actions.extend(["rewind"])
             actions.extend(
                 ["choose_option_" + str(i) for i in range(len(choices))])
@@ -687,7 +687,6 @@ class MARAMFPEnvironment:
                 else:
                     action_took = self.prompt["observations"][-1]["action"][
                         "type"]
-                breakpoint()
                 choices = self.get_choices()
                 choices = [convert_text_color(option) for option in choices]
                 return env_pb2.Observation(
@@ -695,7 +694,7 @@ class MARAMFPEnvironment:
                         "video_location": str(self.current_time)+"/"+str(len(self.prompt["observations"])-1),
                         "render": color_grid,
                         "action_took": action_took,
-                        "choices": choices,
+                        "choices": {0: choices[0], 1: choices[1], 2: choices[2], 3: choices[3], 4: choices[4], 5: choices[5]},
                         "is_finished": self.is_finished,
                     }))
             else:

@@ -1,5 +1,6 @@
 import logging
 import random
+from tkinter import N
 import grpc
 import numpy as np
 import json
@@ -17,7 +18,6 @@ from .concrete_envs import InteractiveEnvironment
 from .interpreter_module import Interpreter
 from .autumnstdlib import autumnstdlib
 from .env_utils import load_yaml_to_dict
-from .concrete_envs import convert_to_grid
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -27,6 +27,45 @@ if not logger.handlers:
 Observation = np.ndarray[str]
 Action = str
 
+def convert_to_grid(
+        obs_json: Dict[str, Any],
+        background_color: int,
+        color_dict: Dict[str, int],
+        grid_size: int,
+        use_color_str: bool = False) -> List[List[Union[int, str]]]:
+    """Convert the observation JSON to a grid."""
+    grid_size = obs_json.get("GRID_SIZE", 0)
+
+    if use_color_str:
+        color_int_to_str = {v: k for k, v in color_dict.items()}
+        grid = [[color_int_to_str[background_color] for _ in range(grid_size)]
+                for _ in range(grid_size)]  # background is 1 by default
+    else:
+        grid = [[background_color for _ in range(grid_size)]
+                for _ in range(grid_size)]  # background is 1 by default
+
+    # Fill in objects from the observation data
+    for obj_type, objects in obs_json.items():
+        if obj_type == "GRID_SIZE":
+            continue
+
+        for obj in objects:
+            x = obj["position"]["x"]
+            y = obj["position"]["y"]
+            color = obj["color"]
+
+            if 0 <= x < grid_size and 0 <= y < grid_size:
+                if color in color_dict:
+                    if use_color_str:
+                        grid[y][x] = color
+                    else:
+                        grid[y][x] = color_dict[color]
+                else:
+                    raise ValueError(
+                        f"Color {color} not found in color_dict. Please add it to the color_dict.yaml file."
+                    )
+
+    return grid
 
 class SimpleWMAgent:
     """
@@ -215,7 +254,7 @@ class SimpleWMAgent:
             if self.task_name == 'mfp':
                 obs_dict = parse_text_obs_to_dict(observation.text_data)
                 action = self._act_mfp_eval(obs_dict, available_actions)
-            elif self.task_name == 'dd':
+            elif self.task_name == 'cd':
                 # If the option `The fault is here!` is available, it means
                 # the agent has found the previous observation to be a defect.
                 # So it would choose `The fault is here!` action.
@@ -267,10 +306,10 @@ class SimpleWMAgent:
                          observations: Observation,
                          choices: List[Observation]) -> int:
         num_matching = [0] * len(choices)
-        masked_area = observations == 'transparent'
+        masked_area = observations == 'mask'
         for sampled_obs in sampled_trajectories:
             for i, choice_content in enumerate(choices):
-                match = sampled_obs[masked_area] == choice_content.flatten()
+                match = sampled_obs[masked_area].flatten() == choice_content.flatten()
                 if match.all():
                     num_matching[i] += 1
         return np.argmax(num_matching)
@@ -298,15 +337,7 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
         task = config.get("task_name")
         self.experiment_seed = int(config.get("seed"))
         random.seed(self.experiment_seed)
-        if str(config.get("use_oracle_interpreter_seed")).lower() == 'true':
-            if task == "mfp":
-                self.interpreter_seed = yaml.safe_load(
-                open(f"{data_dir}/tasks/{env_name}_mfp.yaml")
-                )["seed"]
-            else:
-                self.interpreter_seed = int(config.get("seed"))
-        else:
-            self.interpreter_seed = None
+        self.interpreter_seed = config.get("oracle_seed") if config.get("oracle_seed") else None
         logger.debug(f"Interpreter seed: {self.interpreter_seed}")
         self.colors: Dict[int, str] = load_yaml_to_dict(
             f"{data_dir}/color_dict.yaml")
@@ -659,7 +690,7 @@ def parse_text_obs_to_dict(obs_text: str) -> Dict[str, Any]:
         obs["obs_state"] = _str_grid_to_ndarray(render_txt)
 
     # If multiple option boards are supplied, convert each as well
-    if "options" in obs and isinstance(obs["options"], list):
-        obs["options"] = [_str_grid_to_ndarray(opt) for opt in obs["options"]]
+    if "options" in obs and isinstance(obs["choices"], list):
+        obs["choices"] = [_str_grid_to_ndarray(opt) for opt in obs["choices"]]
 
     return obs

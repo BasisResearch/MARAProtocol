@@ -78,7 +78,7 @@ class ReactVLMAgent(agent_grpc.MARAAgentServicer):
                 image_data = json.loads(image_json_str)
                 if "options" in image_data and "grid" in image_data:
                     # This is MFP data with options
-                    imgs = image_data["options"] + [image_data["grid"]]
+                    imgs = image_data["choices"] + [image_data["grid"]]
                 elif "grid" in image_data and "goal_state" in image_data:
                     # This is PlanningEnvironment data with grid and goal state
                     imgs = [image_data["grid"], image_data["goal_state"]]
@@ -928,7 +928,7 @@ class UnifiedReactAgent(ReactLLMAgentServicer):
                 image_data = json.loads(image_json_str)
                 if "options" in image_data and "grid" in image_data:
                     # This is MFP data with options
-                    imgs = image_data["options"] + [image_data["grid"]]
+                    imgs = image_data["choices"] + [image_data["grid"]]
                     contains_options = True
                     contains_img = True
                 elif "grid" in image_data and "goal_state" in image_data:
@@ -961,7 +961,7 @@ class UnifiedReactAgent(ReactLLMAgentServicer):
                 ])
                 
                 # Add options
-                for i in range(len(image_data["options"])):
+                for i in range(len(image_data["choices"])):
                     content.extend([
                         {
                             "type": "text",
