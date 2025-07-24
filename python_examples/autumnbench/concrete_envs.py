@@ -694,7 +694,8 @@ class MARAMFPEnvironment:
                         "video_location": str(self.current_time)+"/"+str(len(self.prompt["observations"])-1),
                         "render": color_grid,
                         "action_took": action_took,
-                        "choices": {0: choices[0], 1: choices[1], 2: choices[2], 3: choices[3], 4: choices[4], 5: choices[5]},
+                        # "choices": {0: choices[0], 1: choices[1], 2: choices[2], 3: choices[3], 4: choices[4], 5: choices[5]},
+                        "choices": choices,
                         "is_finished": self.is_finished,
                     }))
             else:

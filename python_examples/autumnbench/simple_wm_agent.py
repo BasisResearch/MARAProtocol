@@ -1,12 +1,10 @@
 import logging
 import random
-from tkinter import N
 import grpc
 import numpy as np
 import json
 from typing import Any, Dict, List, Union, Optional
 from abc import abstractmethod
-import yaml
 from collections import deque
 import itertools
 
@@ -160,7 +158,7 @@ class SimpleWMAgent:
             # Not at the stage of making a choice yet, save the action and
             # store the observation
             self.history["observations"].append(obs['obs_state'])
-            if obs['video_location'] != 0:
+            if int(obs['video_location'].split('/')[0]) != 0:
                 self.history["actions"].append(obs['action_took'])
             return self._sample_random_action(available_actions)
         else:
@@ -169,14 +167,15 @@ class SimpleWMAgent:
             # Take the most common choice among the consistent samples
             # If no consistent samples, fallback to random action
             self.history["observations"].append(obs['obs_state'])
-            self.history["actions"].append(obs['action_took'])
+            if int(obs['video_location'].split('/')[0]) != 0:
+                self.history["actions"].append(obs['action_took'])
             final_states = []
             for _ in range(self.num_samples_mc):
                 final_state = self._simulate_for_consistent_final_state(
                     self.history["observations"], self.history["actions"])
                 final_states.append(final_state)
             choice = self._make_mfp_choice(final_states, obs['obs_state'],
-                                           obs['options'])
+                                           obs['choices'])
             return env_pb2.Action(text_data=f"choose_option_{choice}")
 
     def _act_cd_eval(
@@ -370,10 +369,33 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
             matching_reference_obs = True
             self.wm = Interpreter()
             self.wm.run_script(self.prog, autumnstdlib, "", interpreter_seed)
-            # To deal with: https://github.com/BasisResearch/AutumnBenchmark/issues/7
-            obs_json = self.wm.render_all()
 
             sampled_observations = []
+            # add initial observation
+            obs_json = self.wm.render_all()
+            if isinstance(obs_json, str):
+                try:
+                    obs_json = json.loads(obs_json)
+                except:
+                    print(f"Warning: Could not parse observation JSON: "
+                        f"{obs_json}"
+                    )
+                    continue
+            
+            # Use the same function as NFPEnvironment for consistency
+            background_color = self.colors.get(self.wm.get_background(), 1) if hasattr(self.wm, 'get_background') else 1
+            obs_grid = convert_to_grid(obs_json, background_color=background_color, color_dict=self.colors_str_to_int, grid_size=obs_json.get("GRID_SIZE", 16))
+            # Convert to strings using the same color dictionary as NFPEnvironment
+            obs_grid = [[self.colors.get(color, "black") for color in row] for row in obs_grid]
+
+            obs_arr = np.array(obs_grid, dtype=str)
+            
+            # check if it is consistent with the reference observations
+            if reference_observations:
+                if not np.array_equal(obs_arr, reference_observations[0]):
+                    continue
+            sampled_observations.append(obs_arr)
+
             for i, action in enumerate(actions):
                 # Get the next observation from the world model
                 if log_actions:
@@ -387,7 +409,7 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
                     self.wm.up()
                 elif action == "down":
                     self.wm.down()
-                elif action in ["noop", "noop"]:
+                elif action == "noop":
                     pass
                 elif "click" in action:
                     _, x, y = action.split()
@@ -409,20 +431,11 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
                             f"{obs_json}"
                         )
                         continue
-                grid_size = obs_json.get("GRID_SIZE", 16)
-                if hasattr(self.wm, 'get_background') and \
-                    self.wm.get_background() in self.colors_str_to_int:
-                    # Use the background color from the interpreter if available
-                    background_color = self.colors_str_to_int[
-                        self.wm.get_background()]
-                else:
-                    # Default background color if not in colors
-                    background_color = 1
-                obs_grid = convert_to_grid(obs_json,
-                                            background_color,
-                                            self.colors_str_to_int,
-                                            grid_size,
-                                            use_color_str=True)
+                
+                background_color = self.colors.get(self.wm.get_background(), 1) if hasattr(self.wm, 'get_background') else 1
+                obs_grid = convert_to_grid(obs_json, background_color=background_color, color_dict=self.colors_str_to_int, grid_size=obs_json.get("GRID_SIZE", 16))
+                obs_grid = [[self.colors.get(color, "black") for color in row] for row in obs_grid]
+
                 obs_arr = np.array(obs_grid, dtype=str)
                 sampled_observations.append(obs_arr)
 
@@ -430,7 +443,7 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
                     # If we have reference observations, check if the current
                     # observation matches the reference one
                     target_obs = reference_observations[i + 1]
-                    mask = target_obs != 'transparent'
+                    mask = target_obs != 'mask'
                     if not np.array_equal(obs_arr[mask], target_obs[mask]):
                         logging.info(
                             f"Observation {i+1} does not match reference. "
@@ -682,7 +695,15 @@ def parse_text_obs_to_dict(obs_text: str) -> Dict[str, Any]:
         - "options" converted to List[np.ndarray[str]] if present.
           (Original "render" key is removed.)
     """
-    obs: Dict[str, Union[str, int, bool, List[str]]] = json.loads(obs_text)
+    # obs_text is a string like: 
+    # ... some text ...
+    # {"video_location": ..., "render": "...", "action_took": "...", is_finished: ...}
+    obs_text = f"{{{obs_text.split('{')[1].split('}')[0]}}}"
+    # breakpoint()
+    try:
+        obs: Dict[str, Union[str, int, bool, List[str]]] = json.loads(obs_text)
+    except:
+        breakpoint()
 
     # Convert main render block → ndarray and store under "state"
     render_txt = obs.pop("render", None)
@@ -690,7 +711,7 @@ def parse_text_obs_to_dict(obs_text: str) -> Dict[str, Any]:
         obs["obs_state"] = _str_grid_to_ndarray(render_txt)
 
     # If multiple option boards are supplied, convert each as well
-    if "options" in obs and isinstance(obs["choices"], list):
+    if "choices" in obs and isinstance(obs["choices"], list):
         obs["choices"] = [_str_grid_to_ndarray(opt) for opt in obs["choices"]]
 
     return obs
