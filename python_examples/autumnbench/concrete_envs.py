@@ -47,6 +47,8 @@ class InteractiveEnvironment:
         self.logging_path = logging_path
         self.seed = seed
         self.env_name = env_name
+        self.color_dict = load_yaml_to_dict(f"{data_dir}/color_dict.yaml")
+        self.color_dict_str_to_int = {v: k for k, v in self.color_dict.items()}
 
     def reset(self):
         self.interpreter = Interpreter()
@@ -74,11 +76,18 @@ class InteractiveEnvironment:
             self.is_terminal = True
             observation = self.get_observation()
             return observation, 0, self.is_terminal, {}
+        elif action.text_data == "go-to-test":
+            self.is_terminal = True
+            observation = self.get_observation()
+            return observation, 0, self.is_terminal, {}
+        elif action.text_data == "reset":
+            self.interpreter = Interpreter()
+            self.interpreter.run_script(self.prog, autumnstdlib, "", self.seed)
+            observation = self.get_observation()
+            return observation, 0, self.is_terminal, {}
         else:
-            if not interpreter_action_to_text(self.interpreter,
-                                              action.text_data):
-                logger.warning(
-                    f"Invalid action: {action.text_data} for id: {self.id}")
+            if not interpreter_action_to_text(self.interpreter, action.text_data):
+                logger.warning(f"Invalid action: {action.text_data} for id: {self.id}")
                 return self.get_observation(), 0, self.is_terminal, {}
             self.interpreter.step()
             observation = self.get_observation()
@@ -92,12 +101,10 @@ class InteractiveEnvironment:
                     # if self.render_mode == "text":
                     if not self.skip_frames:
                         observation = "\n\nObservation: ".join(stacked_frames)
-                        observation = env_pb2.Observation(
-                            text_data=observation)
+                        observation = env_pb2.Observation(text_data=observation)
                     else:
                         observation = env_pb2.Observation(
-                            text_data=
-                            f"Skipped {self.stack_frames} frames. Current frame: {observation.text_data}"
+                            text_data=f"Skipped {self.stack_frames} frames. Current frame: {observation.text_data}"
                         )
                 elif self.render_mode == "image":
                     stacked_frames = [observation.image_data]
@@ -106,41 +113,76 @@ class InteractiveEnvironment:
                         observation = self.get_observation()
                         stacked_frames.append(observation.image_data)
                     if not self.skip_frames:
-                        observation = "\n\nObservation: ".join(stacked_frames)
+                        # For image mode, we can't join image data as strings, so we'll use the last frame
                         observation = env_pb2.Observation(
-                            image_data=observation.image_data)
+                            image_data=stacked_frames[-1]
+                        )
                     else:
                         observation = env_pb2.Observation(
-                            text_data=
-                            f"Skipped {self.stack_frames} frames. Here is the current frame: ",
-                            image_data=observation.image_data)
+                            text_data=f"Skipped {self.stack_frames} frames. Here is the current frame: ",
+                            image_data=observation.image_data,
+                        )
             logger.debug(f"Observation: {observation} for id: {self.id}")
             return observation, 0, self.is_terminal, {}
 
     def get_observation(self) -> env_pb2.Observation:
         if not self.inited:
             self.inited = True
-            return env_pb2.Observation(
-                text_data=
-                "Welcome, you will now be playing an Autumn interactive environment."
-                +
-                "Remember what you see and how the environment works, as you will be queried about it later."
+            # show the initial state of the grid
+            render_dict = json.loads(self.interpreter.render_all())
+            render_img_str = render_grid_matplotlib(
+                render_dict,
+                output_path=f"{self.logging_path}/{self.env_name}/interactive/interactive_{self.time}.jpeg",
+                background_color=self.interpreter.get_background(),
+                color_dict=self.color_dict_str_to_int
             )
+            render_img_bytes = base64.b64decode(render_img_str)
+            render_dict = render_grid(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
+            if self.render_mode == "text":
+                return env_pb2.Observation(
+                    text_data=self.get_instruction_text() + " Here is the initial state of the grid: " + json.dumps(render_dict)
+                )
+            elif self.render_mode == "image":
+                return env_pb2.Observation(
+                    text_data=self.get_instruction_text() + " Here is the initial state of the grid: ",
+                    image_data=render_img_bytes,
+                )
+            else:
+                raise ValueError(f"Invalid render mode: {self.render_mode}")
         render_dict = json.loads(self.interpreter.render_all())
         render_img_str = render_grid_matplotlib(
             render_dict,
-            output_path=
-            f"{self.logging_path}/{self.env_name}/interactive/interactive_{self.time}.jpeg"
+            output_path=f"{self.logging_path}/{self.env_name}/interactive/interactive_{self.time}.jpeg",
+            background_color=self.interpreter.get_background(),
+            color_dict=self.color_dict_str_to_int
         )
         render_img_bytes = base64.b64decode(render_img_str)
-        render_dict = render_grid(render_dict)
+        render_dict = render_grid(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
         if self.render_mode == "text":
             return env_pb2.Observation(text_data=json.dumps(render_dict))
         elif self.render_mode == "image":
-            return env_pb2.Observation(text_data="Here is the current frame: ",
-                                       image_data=render_img_bytes)
+            return env_pb2.Observation(
+                text_data="Here is the current frame: ", image_data=render_img_bytes
+            )
         else:
             raise ValueError(f"Invalid render mode: {self.render_mode}")
+
+    def get_instruction_text(self):
+        # task_descriptions = {
+        #     "planning": "In the test phase, you will solve a planning task in the environment you interacted with using your understanding of the dynamics of the environment. You will be given a goal state as well as a highlight mask. Your aim is to interact in the environment such that the highlighted region (i.e. where values are 1) of the grid matches the goal state. If you want to quit, click 'quit'. If you want to submit, click 'submit'. You will be penalized if you click 'submit' before the goal state is reached. You will be told if you have reached the goal state or not. Think carefully about the goal to be reached and your understanding of the environment before taking any actions as you might get stuck.",
+        #     "defect_detection": "In the test phase, you will interact with a defective version of the environment - where one of the dynamics rules has been changed. Your goal is to use you understanding of the environemnt from the interaction phase to detect the fault. The environment will start in a normal state and then at some point, the environment will transition to a defective state. As soon as you detect the fault, you have to select 'Fault!' action to terminate the environment. You will be penalized if you click 'Fault!' before the fault is detected.",
+        #     "next_frame_prediction": "In the test phase, you will step through frames from a trajectory in this same environment you interacted with. Each frame is structured as a json object with the following fields: \"render\": the grid observed, \"video_location\": timestep at which the frame was observed, \"action_took\": action taken at this timestep, \"is_finished\": whether the episode is finished. IMPORTANT: You must step through ALL frames in the trajectory before making any choice. Use the `step` action to advance through each frame one at a time. You can use your scratchpad to record your thoughts and observations as you go through the frames. Pay attention to patterns, movements, and how the environment evolves over time. Towards the end of the trajectory, parts of the grid will be masked (where the masked locations are marked as `mask`) and you will be given a set of options to fill in the masked region at the final timestep. Only after stepping through all frames should you choose the option that fits the masked region at the final timestep.",
+        # }
+        
+        # task_description = task_descriptions.get(self.task_name, self.task_name)
+        
+        return f"""Welcome, you are now in the interactive phase, where you can interact with the grid using the available actions.
+During the interactive phase your goal is to act in the environment to understand the underlying rules of the environment. 
+Understand the environment and the dynamics of the environment well. Once you have understood the environment, you can select 'go-to-test' to go to the test phase.
+After the interactive phase you will be asked to use this knowledge about the environment to answer some questions about it.
+
+"""
+# Task Description: {task_description}
 
     def terminal(self):
         return self.is_terminal
@@ -244,7 +286,7 @@ class ChangeDetectionEnvironment:
                 "You will be penalized if you click 'Fault!' before the fault is detected."
             )
         render_dict = json.loads(self.interpreter.render_all())
-        render_dict = render_grid(render_dict)
+        render_dict = render_grid(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
         return env_pb2.Observation(text_data=json.dumps(render_dict))
 
     def terminal(self):
@@ -275,6 +317,8 @@ class CDSliderEnvironment:
         self.skip_frames = skip_frames
         self.logging_path = logging_path
         self.seed = seed
+        self.color_dict = load_yaml_to_dict(f"{self.data_dir}/color_dict.yaml")
+        self.color_dict_str_to_int = {v: k for k, v in self.color_dict.items()}
         self.last_interpreting_action = None
         self.reset()
 
@@ -415,14 +459,15 @@ class CDSliderEnvironment:
         if self.state == "interactive":
             if self.render_mode == "text":
                 render_dict = json.loads(self.interpreter.render_all())
-                render_dict = render_grid(render_dict)
+                render_dict = render_grid(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
                 return env_pb2.Observation(text_data=json.dumps(render_dict))
             elif self.render_mode == "image":
                 render_dict = json.loads(self.interpreter.render_all())
                 render_img_str = render_grid_matplotlib(
                     render_dict,
                     output_path=
-                    f"{self.logging_path}/{self.env_name}/cd/cd_{self.time}.jpeg"
+                    f"{self.logging_path}/{self.env_name}/cd/cd_{self.time}.jpeg",
+                    color_dict=self.color_dict_str_to_int
                 )
                 render_img_bytes = base64.b64decode(render_img_str)
                 return env_pb2.Observation(
@@ -506,6 +551,7 @@ class PlanningEnvironment:
         self.is_terminal = False
 
         self.color_dict = load_yaml_to_dict(f"{self.data_dir}/color_dict.yaml")
+        self.color_dict_str_to_int = {v: k for k, v in self.color_dict.items()}
         self.inv_mask = self.ap_dict["mask"]  # Inv mask is for checking which region need to be the same color
         self.goal_state = self.ap_dict["goal"]
         self.goal_state = [[self.color_dict[cell] for cell in row]
@@ -560,8 +606,7 @@ class PlanningEnvironment:
 
     def planning_observation(self) -> env_pb2.Observation:
         render_dict = json.loads(self.interpreter.render_all())
-        # render_dict = render_grid(render_dict)
-        grid_matrix = render_grid_to_matrix(render_dict)
+        grid_matrix = render_grid_to_matrix(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
         if check_grid_same(grid_matrix, self.goal_state, self.inv_mask):
             return env_pb2.Observation(
                 text_data="You have successfully predicted the action.")
@@ -583,7 +628,7 @@ class PlanningEnvironment:
             )
         if self.render_mode == "text":
             render_dict = json.loads(self.interpreter.render_all())
-            render_grid_matrix = render_grid(render_dict)
+            render_grid_matrix = render_grid(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
             return env_pb2.Observation(
                 text_data=json.dumps({
                     "render": render_grid_matrix,
@@ -595,16 +640,17 @@ class PlanningEnvironment:
             render_img_str = render_grid_matplotlib(
                 render_dict,
                 output_path=
-                f"{self.logging_path}/{self.env_name}/planning/planning_{self.time}.jpeg"
+                f"{self.logging_path}/{self.env_name}/planning/planning_{self.time}.jpeg",
+                color_dict=self.color_dict_str_to_int
             )
 
-            color_name_lookup = {v: k for k, v in self.color_dict.items()}
             goal_color_grid = "\n".join(
                 [" ".join(row) for row in self.goal_state])
             goal_img_str = render_string_grid_matplotlib(
                 goal_color_grid,
                 output_path=
-                f"{self.logging_path}/{self.env_name}/planning/goal_state_{self.time}.jpeg"
+                f"{self.logging_path}/{self.env_name}/planning/goal_state_{self.time}.jpeg",
+                color_dict=self.color_dict_str_to_int
             )
 
             # Create a JSON structure with both images
@@ -635,6 +681,8 @@ class MARAMFPEnvironment:
         self.render_mode = render_mode
         self.logging_path = logging_path
         self.data_dir = data_dir
+        self.color_dict = load_yaml_to_dict(f"{self.data_dir}/color_dict.yaml")
+        self.color_dict_str_to_int = {v: k for k, v in self.color_dict.items()}
 
     def reset(self) -> None:
         with open(f"{self.data_dir}/prompts/{self.env_name}_mfp.json", "r") as f:
@@ -738,13 +786,15 @@ You will step through the trajectory one frame at a time. Towards the end of the
                     render_string_grid_matplotlib(
                         option,
                         output_path=
-                        f"{self.logging_path}/{self.env_name}/mfp/mfp_option_{i}.jpeg"
+                        f"{self.logging_path}/{self.env_name}/mfp/mfp_option_{i}.jpeg",
+                        color_dict=self.color_dict_str_to_int
                     ) for i, option in enumerate(choices)
                 ]
                 grid_image = render_string_grid_matplotlib(
                     color_grid,
                     output_path=
-                    f"{self.logging_path}/{self.env_name}/mfp/mfp_render_{self.current_time}.jpeg"
+                    f"{self.logging_path}/{self.env_name}/mfp/mfp_render_{self.current_time}.jpeg",
+                    color_dict=self.color_dict_str_to_int
                 )
 
                 # Create a JSON structure with all images
@@ -795,7 +845,8 @@ You will step through the trajectory one frame at a time. Towards the end of the
                         render_string_grid_matplotlib(
                             color_grid,
                             output_path=
-                            f"{self.logging_path}/{self.env_name}/mfp/mfp_render_{self.current_time}.jpeg"
+                            f"{self.logging_path}/{self.env_name}/mfp/mfp_render_{self.current_time}.jpeg",
+                            color_dict=self.color_dict_str_to_int
                         ))
                 ) if self.current_time == 0 else env_pb2.Observation(
                     text_data=json.dumps({
@@ -807,7 +858,8 @@ You will step through the trajectory one frame at a time. Towards the end of the
                         render_string_grid_matplotlib(
                             color_grid,
                             output_path=
-                            f"{self.logging_path}/{self.env_name}/mfp/mfp_render_{self.current_time}.jpeg"
+                            f"{self.logging_path}/{self.env_name}/mfp/mfp_render_{self.current_time}.jpeg",
+                            color_dict=self.color_dict_str_to_int
                         )))
 
     def terminal(self):

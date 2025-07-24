@@ -1,6 +1,7 @@
 import json
 import base64
 import io
+import os
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
@@ -9,23 +10,9 @@ from .interpreter_module import Interpreter
 import yaml
 from generated.mara import mara_environment_pb2 as env_pb2
 
-DEFAULT_COLOR = "black"
-
-# Define the color mapping for different grid entities
-COLOR_MAP = {
-    "gray": "gray",
-    "gold": "gold",
-    "green": "green",
-    "mediumpurple": "mediumpurple",
-    "purple": "purple",
-    "white": "white",
-    "yellow": "yellow",
-    "blue": "blue",
-    "red": "red",
-    "orange": "orange",
-    # Add more mappings as needed
-}
-
+DEFAULT_COLOR_DICT = {"transparent": 0, "mask": 0, "black": 1, "gray": 2, "grey": 3, "gold": 4, "green": 5, "mediumpurple": 6, "purple": 7, "white": 8, "yellow": 9, "blue": 10, "red": 11, "orange": 12, "sandybrown": 13, "brown": 14, 
+"pink": 15, "lightblue": 16, "orangered": 17, "skyblue": 18, "lightcyan": 19, "lightgreen": 20, "magenta": 21, "darkgray": 22, "darkgrey": 23, "darkblue": 24, "darkgreen": 25, "darkred": 26, "tan": 27, "lightpink": 28, "crimson": 29, 
+"goldenrod": 30, "steelblue": 31, "coral": 32, "silver": 33, "seagreen": 34, "limegreen": 35, "cyan": 36, "lightgray": 37, "maroon": 38, "darkorange": 39}
 
 def load_yaml_to_dict(filepath):
     """
@@ -67,7 +54,7 @@ def get_action_space_interactive(
         time_step: int = 1,
         truncated_action_space: bool = True) -> List[env_pb2.Action]:
     acts = []
-    if time_step > 0:
+    if time_step >= 0:
         acts = ["left", "right", "up", "down"]
         if truncated_action_space:
             acts.append(f"click [0-{grid_size-1}] [0-{grid_size-1}]")
@@ -76,27 +63,37 @@ def get_action_space_interactive(
                 for j in range(grid_size):
                     acts.append(f"click {i} {j}")
     acts.append("noop")
+    acts.append("quit")
+    acts.append("go-to-test")
+    acts.append("reset")
     return [env_pb2.Action(text_data=act) for act in acts]
 
 
 def interpreter_action_to_text(interpreter: Interpreter, action: str) -> str:
-    if action.startswith("click"):
-        x, y = action.strip().split()[1:]
-        interpreter.click(int(x), int(y))
-        return True
-    elif action == "left":
+    # Only process the first line of the action to handle multi-line actions
+    first_line = action.strip().split('\n')[0].strip()
+    
+    if first_line.startswith("click"):
+        parts = first_line.split()
+        if len(parts) >= 3:
+            x, y = parts[1], parts[2]
+            interpreter.click(int(x), int(y))
+            return True
+        else:
+            return False
+    elif first_line == "left":
         interpreter.left()
         return True
-    elif action == "right":
+    elif first_line == "right":
         interpreter.right()
         return True
-    elif action == "up":
+    elif first_line == "up":
         interpreter.up()
         return True
-    elif action == "down":
+    elif first_line == "down":
         interpreter.down()
         return True
-    elif action == "noop":
+    elif first_line == "noop":
         return True
     return False
 
@@ -121,7 +118,7 @@ def parse_grid(render_output: str):
     return grid, grid_size
 
 
-def render_grid(grid: Dict[str, Any]) -> str:
+def render_grid(grid: Dict[str, Any], background_color: str = "black", color_dict: Dict[str, int] = DEFAULT_COLOR_DICT) -> str:
     """
     Renders the grid into a string representation.
 
@@ -130,35 +127,40 @@ def render_grid(grid: Dict[str, Any]) -> str:
     
     """
     grid_size = grid.pop("GRID_SIZE", 0)
-    grid_matrix = [[DEFAULT_COLOR for _ in range(grid_size)]
+    grid_matrix = [[background_color for _ in range(grid_size)]
                    for _ in range(grid_size)]
     for elem in grid:
         for subelem in grid[elem]:
             col_idx = subelem["position"]["x"]
             row_idx = subelem["position"]["y"]
             color_key = subelem["color"].lower()
-            color = COLOR_MAP.get(color_key, color_key)
+            color = color_dict.get(color_key, color_key)
+            # If color is an integer, convert it to the actual color name
+            if isinstance(color, int):
+                color = color_dict.get(color, color_key)
             if (row_idx >= 0 and row_idx
                     < grid_size) and (col_idx >= 0 and col_idx < grid_size):
                 grid_matrix[row_idx][col_idx] = color
     return '\n'.join([' '.join(row) for row in grid_matrix])
 
 
-def render_grid_to_matrix(grid: Dict[str, Any]) -> List[List[str]]:
+def render_grid_to_matrix(grid: Dict[str, Any], background_color: str = "black", color_dict: Dict[str, int] = DEFAULT_COLOR_DICT) -> List[List[str]]:
     grid_size = grid.pop("GRID_SIZE", 0)
-    grid_matrix = [[DEFAULT_COLOR for _ in range(grid_size)]
+    grid_matrix = [[background_color for _ in range(grid_size)]
                    for _ in range(grid_size)]
     for elem in grid:
         for subelem in grid[elem]:
             col_idx = subelem["position"]["x"]
             row_idx = subelem["position"]["y"]
             color_key = subelem["color"].lower()
-            color = COLOR_MAP.get(color_key, color_key)
+            color = color_dict.get(color_key, color_key)
+            # If color is an integer, convert it to the actual color name
+            if isinstance(color, int):
+                color = color_dict.get(color, color_key)
             if (row_idx >= 0 and row_idx
                     < grid_size) and (col_idx >= 0 and col_idx < grid_size):
                 grid_matrix[row_idx][col_idx] = color
     return grid_matrix
-
 
 def check_grid_same(grid1: List[List[str]], grid2: List[List[str]],
                     inv_mask: List[List[bool]]) -> bool:
@@ -172,7 +174,7 @@ def check_grid_same(grid1: List[List[str]], grid2: List[List[str]],
 
 
 def render_grid_matplotlib(grid: Dict[str, Any],
-                           output_path: str = None, background_color: str = "black") -> str:
+                           output_path: str = None, background_color: str = "black", color_dict: Dict[str, int] = DEFAULT_COLOR_DICT) -> str:
     """
     Renders the grid into a base64 encoded image string using matplotlib.
     Optionally saves the image to a file if output_path is provided.
@@ -213,10 +215,10 @@ def render_grid_matplotlib(grid: Dict[str, Any],
                 row_idx = subelem["position"]["y"]
                 if (row_idx >= 0 and row_idx < grid_size) and (col_idx >= 0 and col_idx < grid_size):
                     color_key = subelem["color"].lower()
-                    actual_color = COLOR_MAP.get(color_key, color_key)
+                    actual_color = color_dict.get(color_key, color_key)
                     # If color is an integer, convert it to the actual color name
                     if isinstance(actual_color, int):
-                        actual_color = COLOR_DICT.get(actual_color, color_key)
+                        actual_color = color_dict.get(actual_color, color_key)
                     temp_grid_matrix[row_idx][col_idx] = actual_color
                     if actual_color not in local_color_list:
                         local_color_list.append(actual_color)
@@ -305,15 +307,15 @@ def render_grid_matplotlib(grid: Dict[str, Any],
     return base64.b64encode(image_bytes).decode('utf-8')
 
 
-def render_string_grid_matplotlib(grid: List[List[str]],
-                                  output_path: str = None) -> str:
+def render_string_grid_matplotlib(grid: str,
+                                  output_path: str = None, background_color: str = "black", color_dict: Dict[str, int] = DEFAULT_COLOR_DICT) -> str:
     """
-    Renders a grid structured as list of lists of strings into a base64 encoded image string using matplotlib.
+    Renders a grid structured as a string into a base64 encoded image string using matplotlib.
     Entries marked as "mask" will be displayed as slategrey.
     Optionally saves the image to a file if output_path is provided.
 
     Args:
-        grid (List[List[str]]): The grid as a list of lists of strings (color names).
+        grid (str): The grid as a string with newlines separating rows and spaces separating columns.
         output_path (str, optional): The path to save the image. Defaults to None.
 
     Returns:
@@ -370,16 +372,18 @@ def render_string_grid_matplotlib(grid: List[List[str]],
             # Handle mask entries
             if color_name == "mask":
                 color = "slategrey"
+                is_masked = True
             else:
-                # Try to get color from COLOR_MAP, fallback to the color name itself
-                color = COLOR_MAP.get(color_name, color_name)
+                # Use the color name directly since it's already a valid color name
+                color = color_name
+                is_masked = False
 
             # Validate color for matplotlib
             try:
                 mcolors.to_rgb(color)
                 actual_color = color
             except ValueError:
-                actual_color = DEFAULT_COLOR
+                actual_color = background_color
 
             # Calculate position with consistent spacing
             x_pos = margin + c * (cell_size + gap_size)
@@ -393,6 +397,21 @@ def render_string_grid_matplotlib(grid: List[List[str]],
                                  edgecolor='black',
                                  linewidth=0.5)
             ax.add_patch(rect)
+            
+            # Add cross for masked cells ONLY
+            if color_name == "mask":
+                # Calculate cross endpoints
+                cross_size = cell_size * 0.3  # Cross size relative to cell
+                center_x = x_pos + cell_size / 2
+                center_y = y_pos + cell_size / 2
+                
+                # Draw diagonal cross
+                ax.plot([center_x - cross_size, center_x + cross_size], 
+                       [center_y - cross_size, center_y + cross_size], 
+                       color='black', linewidth=2)
+                ax.plot([center_x - cross_size, center_x + cross_size], 
+                       [center_y + cross_size, center_y - cross_size], 
+                       color='black', linewidth=2)
 
     # Set the limits and aspect ratio to fit the entire grid
     ax.set_xlim(0, total_space)
