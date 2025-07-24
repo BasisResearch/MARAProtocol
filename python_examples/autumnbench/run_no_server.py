@@ -25,7 +25,7 @@ def get_environment_ids(data_dir: str, task_name: str):
                 data = json.load(f)
                 task_type = data["type"]
                 match task_type:
-                    case "mask_frame_prediction":
+                    case "masked_frame_prediction":
                         environment_ids.append(f"{data['program']}_mfp")
                     case "change_detection":
                         environment_ids.append(f"{data['program']}_cd")
@@ -70,8 +70,7 @@ def run_multi_environment_evaluation(cfg: DictConfig):
             "task_name": cfg.task_name,
             "use_scratchpad": cfg.use_scratchpad,
             "instruction_type": cfg.instruction_type,
-            "hint": cfg.hint,
-            "use_oracle_interpreter_seed": cfg.use_oracle_interpreter_seed,
+            "hint": cfg.hint
         }
     )
 

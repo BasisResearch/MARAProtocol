@@ -18,8 +18,7 @@ use_scratchpad: true
 instruction_type: "reflection"
 hint: true
 
-# Oracle autumnSynth agent parameters
-use_oracle_interpreter_seed: True
+oracle_seed: null
 
 logging_path: "./logs"
 

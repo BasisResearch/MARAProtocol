@@ -638,16 +638,13 @@ class MARAMFPEnvironment:
 
     def reset(self) -> None:
         with open(f"{self.data_dir}/prompts/{self.env_name}_mfp.json", "r") as f:
-            self.task_dict = json.load(f)
+            self.prompt = json.load(f)
         
         with open(f"{self.data_dir}/answers/{self.env_name}_mfp.json", "r") as f:
-            self.answer_answer_idx = json.load(f)["correct_idx"]
+            self.answer = json.load(f)
         self.is_terminal = False
         self.is_finished = False
-        self.data = json.load(open(f"{self.data_dir}/prompts/{self.env_name}_mfp.json"))
         self.current_time = 0
-        self.current_question = 0
-        self.options = None
         # Load and process colors
         self.colors: Dict[int, str] = load_yaml_to_dict(
             f"{self.data_dir}/color_dict.yaml")
@@ -661,10 +658,10 @@ class MARAMFPEnvironment:
         # If not finished
         actions = ["step"]
         if self.is_finished:
-            options = self.get_options(self.current_question)
+            choices = self.get_choices(self.current_question)
             actions.extend(["rewind"])
             actions.extend(
-                ["choose_option_" + str(i) for i in range(len(options))])
+                ["choose_option_" + str(i) for i in range(len(choices))])
         return [env_pb2.Action(text_data=act) for act in actions]
 
     def get_observation(self) -> env_pb2.Observation:
@@ -672,35 +669,33 @@ class MARAMFPEnvironment:
         # Current video frame, current video location, current grid (masked)
         # Choices if any
         convert_text_color = lambda x: '\n'.join([
-            ' '.join([self.colors.get(cell, "black") for cell in row])
+            ' '.join(["mask" if cell == 0 else self.colors.get(cell, "black") for cell in row])
             for row in x
         ])
-
-        with open(f"tmp.json", "w") as f:
-            json.dump(self.task_dict, f)
-        render = self.task_dict["observations"][self.current_time]["masked_grid"]
+        render = self.prompt["observations"][self.current_time]["masked_grid"]
         color_grid = convert_text_color(render)
 
         if self.render_mode == "text":
             if self.is_finished:
-                if self.task_dict["observations"][-1]["action"][
+                if self.prompt["observations"][-1]["action"][
                         "type"] == "click":
-                    action_took = self.task_dict["observations"][-1]["action"][
+                    action_took = self.prompt["observations"][-1]["action"][
                         "type"] + " " + str(
-                            self.task_dict["observations"][-1]["action"]["x"]
+                            self.prompt["observations"][-1]["action"]["x"]
                         ) + " " + str(
-                            self.task_dict["observations"][-1]["action"]["y"])
+                            self.prompt["observations"][-1]["action"]["y"])
                 else:
-                    action_took = self.task_dict["observations"][-1]["action"][
+                    action_took = self.prompt["observations"][-1]["action"][
                         "type"]
-                options = self.get_options(self.current_question)
-                options = [convert_text_color(option) for option in options]
+                breakpoint()
+                choices = self.get_choices()
+                choices = [convert_text_color(option) for option in choices]
                 return env_pb2.Observation(
                     text_data=json.dumps({
-                        "video_location": str(self.current_time)+"/"+str(len(self.task_dict["observations"])-1),
+                        "video_location": str(self.current_time)+"/"+str(len(self.prompt["observations"])-1),
                         "render": color_grid,
                         "action_took": action_took,
-                        "options": options,
+                        "choices": choices,
                         "is_finished": self.is_finished,
                     }))
             else:
@@ -711,25 +706,25 @@ class MARAMFPEnvironment:
 \"video_location\": timestep at which the frame was observed,
 \"action_took\": action taken at this timestep,
 \"is_finished\": whether the episode is finished.
-You will step through the trajectory one frame at a time. Towards the end of the trajectory, parts of the grid will be masked (where the masked locations are marked as `mask`) and you will be given a set of options to fill in the masked region at the final timestep. You need to choose option that fits the masked region at the final timestep.\n"""+\
+You will step through the trajectory one frame at a time. Towards the end of the trajectory, parts of the grid will be masked (where the masked locations are marked as `mask`) and you will be given a set of choices to fill in the masked region at the final timestep. You need to choose option that fits the masked region at the final timestep.\n"""+\
                     json.dumps({
-                        "video_location": str(self.current_time)+"/"+str(len(self.task_dict["observations"])-1),
+                        "video_location": str(self.current_time)+"/"+str(len(self.prompt["observations"])-1),
                         "render": color_grid,
-                        # "action_took": action_took,
+                        "action_took": "start",
                         "is_finished": self.is_finished,})
                 else:
-                    if self.task_dict["observations"][
+                    if self.prompt["observations"][
                             self.current_time]["action"]["type"] == "click":
-                        click_x = self.task_dict["observations"][
+                        click_x = self.prompt["observations"][
                             self.current_time]["action"]["x"]
-                        click_y = self.task_dict["observations"][
+                        click_y = self.prompt["observations"][
                             self.current_time]["action"]["y"]
                         action_took = f"click {click_x} {click_y}"
                     else:
-                        action_took = self.task_dict["observations"][
+                        action_took = self.prompt["observations"][
                             self.current_time]["action"]["type"]
                     text_data = json.dumps({
-                        "video_location": str(self.current_time)+"/"+str(len(self.task_dict["observations"])-1),
+                        "video_location": str(self.current_time)+"/"+str(len(self.prompt["observations"])-1),
                         "render": color_grid,
                         "action_took": action_took,
                         "is_finished": self.is_finished,
@@ -737,14 +732,14 @@ You will step through the trajectory one frame at a time. Towards the end of the
                 return env_pb2.Observation(text_data=text_data)
         elif self.render_mode == "image":
             if self.is_finished:
-                options = self.get_options(self.current_question)
-                options = [convert_text_color(option) for option in options]
-                options = [
+                choices = self.get_choices()
+                choices = [convert_text_color(option) for option in choices]
+                choices = [
                     render_string_grid_matplotlib(
                         option,
                         output_path=
                         f"{self.logging_path}/{self.env_name}/mfp/mfp_option_{i}.jpeg"
-                    ) for i, option in enumerate(options)
+                    ) for i, option in enumerate(choices)
                 ]
                 grid_image = render_string_grid_matplotlib(
                     color_grid,
@@ -753,36 +748,36 @@ You will step through the trajectory one frame at a time. Towards the end of the
                 )
 
                 # Create a JSON structure with all images
-                image_data = {"options": options, "grid": grid_image}
+                image_data = {"choices": choices, "grid": grid_image}
                 image_json_str = json.dumps(image_data)
-                if self.task_dict["observations"][-1]["action"][
+                if self.prompt["observations"][-1]["action"][
                         "type"] == "click":
-                    action_took = self.task_dict["observations"][-1]["action"][
+                    action_took = self.prompt["observations"][-1]["action"][
                         "type"] + " " + str(
-                            self.task_dict["observations"][-1]["action"]["x"]
+                            self.prompt["observations"][-1]["action"]["x"]
                         ) + " " + str(
-                            self.task_dict["observations"][-1]["action"]["y"])
+                            self.prompt["observations"][-1]["action"]["y"])
                 else:
-                    action_took = self.task_dict["observations"][-1]["action"][
+                    action_took = self.prompt["observations"][-1]["action"][
                         "type"]
                 return env_pb2.Observation(
                     text_data=json.dumps({
-                        "video_location": str(self.current_time)+"/"+str(len(self.task_dict["observations"])-1),
+                        "video_location": str(self.current_time)+"/"+str(len(self.prompt["observations"])-1),
                         "action_took": action_took,
                         "is_finished": self.is_finished,
                     }),
                     image_data=image_json_str.encode('utf-8'))
             else:
-                if self.task_dict["observations"][
+                if self.prompt["observations"][
                         self.current_time]["action"]["type"] == "click":
-                    action_took = self.task_dict["observations"][
+                    action_took = self.prompt["observations"][
                         self.current_time]["action"]["type"] + " " + str(
-                            self.task_dict["observations"][
+                            self.prompt["observations"][
                                 self.current_time]["action"]["x"]) + " " + str(
-                                    self.task_dict["observations"][
+                                    self.prompt["observations"][
                                         self.current_time]["action"]["y"])
                 else:
-                    action_took = self.task_dict["observations"][
+                    action_took = self.prompt["observations"][
                         self.current_time]["action"]["type"]
                 return env_pb2.Observation(
                     text_data=
@@ -790,9 +785,9 @@ You will step through the trajectory one frame at a time. Towards the end of the
                                            \"video_location\": timestep at which the frame was observed,
                                            \"action_took\": action taken at this timestep,
                                            \"is_finished\": whether the episode is finished.
-                                           You will step through the trajectory one frame at a time. Towards the end of the trajectory, you will be given masked states (where the masked locations are colored slategrey) and at the end of the trajectory, you will be given a set of options to fill in the masked region. You need to choose the correct option.\n"""
+                                           You will step through the trajectory one frame at a time. Towards the end of the trajectory, you will be given masked states (where the masked locations are colored slategrey) and at the end of the trajectory, you will be given a set of choices to fill in the masked region. You need to choose the correct option.\n"""
                     + json.dumps({
-                        "video_location": str(self.current_time)+"/"+str(len(self.task_dict["observations"])-1),
+                        "video_location": str(self.current_time)+"/"+str(len(self.prompt["observations"])-1),
                         "action_took": action_took,
                         "is_finished": self.is_finished,
                     }),
@@ -804,7 +799,7 @@ You will step through the trajectory one frame at a time. Towards the end of the
                         ))
                 ) if self.current_time == 0 else env_pb2.Observation(
                     text_data=json.dumps({
-                        "video_location": str(self.current_time)+"/"+str(len(self.task_dict["observations"])-1),
+                        "video_location": str(self.current_time)+"/"+str(len(self.prompt["observations"])-1),
                         "action_took": action_took,
                         "is_finished": self.is_finished,
                     }),
@@ -832,15 +827,15 @@ You will step through the trajectory one frame at a time. Towards the end of the
             return observation, 0, self.terminal(), {}
         elif action.text_data == "step":
             self.current_time = min(self.current_time + 1,
-                                    len(self.task_dict["observations"]) - 1)
-            if self.current_time >= len(self.task_dict["observations"]) - 1:
+                                    len(self.prompt["observations"]) - 1)
+            if self.current_time >= len(self.prompt["observations"]) - 1:
                 self.is_finished = True
             observation = self.get_observation()
             return observation, 0, self.terminal(), {}
         elif action.text_data.startswith("choose_option_"):
             self.is_terminal = True
             self.current_option = int(action.text_data.split("_")[-1])
-            if self.current_option == self.correct_idx:
+            if self.current_option == self.answer["correct_idx"]:
                 observation = self.get_observation()
                 return observation, 1, self.terminal(), {}
             else:
@@ -854,89 +849,8 @@ You will step through the trajectory one frame at a time. Towards the end of the
             observation = self.get_observation()
             return observation, 0, self.terminal(), {}
 
-    def get_options(self, question_idx: int) -> List[str]:
-        if self.options is not None:
-            return self.options
-        all_options = self.task_dict["choices"]
-
-        correct_idx = self.task_dict["answer"]["correct_idx"]
-
-        self.options = all_options
-        self.correct_idx = correct_idx
-        return all_options
-
-
-def create_rectangular_mask(rect: Dict[str, int],
-                            grid_size: int) -> List[List[int]]:
-    """Create a mask grid from rectangular coordinates."""
-    x, y, width, height = rect["x"], rect["y"], rect["width"], rect["height"]
-    mask = [[1 for _ in range(grid_size)] for _ in range(grid_size)]
-
-    for i in range(y, y + height):
-        for j in range(x, x + width):
-            if 0 <= i < grid_size and 0 <= j < grid_size:
-                mask[i][j] = 0
-
-    return mask
-
-
-def convert_to_grid(
-        obs_json: Dict[str, Any],
-        background_color: int,
-        color_dict: Dict[str, int],
-        grid_size: int,
-        use_color_str: bool = False) -> List[List[Union[int, str]]]:
-    """Convert the observation JSON to a grid."""
-    grid_size = obs_json.get("GRID_SIZE", 0)
-
-    if use_color_str:
-        color_int_to_str = {v: k for k, v in color_dict.items()}
-        grid = [[color_int_to_str[background_color] for _ in range(grid_size)]
-                for _ in range(grid_size)]  # background is 1 by default
-    else:
-        grid = [[background_color for _ in range(grid_size)]
-                for _ in range(grid_size)]  # background is 1 by default
-
-    # Fill in objects from the observation data
-    for obj_type, objects in obs_json.items():
-        if obj_type == "GRID_SIZE":
-            continue
-
-        for obj in objects:
-            x = obj["position"]["x"]
-            y = obj["position"]["y"]
-            color = obj["color"]
-
-            if 0 <= x < grid_size and 0 <= y < grid_size:
-                if color in color_dict:
-                    if use_color_str:
-                        grid[y][x] = color
-                    else:
-                        grid[y][x] = color_dict[color]
-                else:
-                    raise ValueError(
-                        f"Color {color} not found in color_dict. Please add it to the color_dict.yaml file."
-                    )
-
-    return grid
-
-
-def apply_mask(obs_grid: List[List[int]],
-               mask: List[List[int]]) -> List[List[int]]:
-    """Apply the mask to the observation grid."""
-    if not mask:
-        return obs_grid
-
-    new_obs_grid = []
-    for row in range(len(obs_grid)):
-        new_row = []
-        for col in range(len(obs_grid[row])):
-            if mask[row][col] == 0:
-                new_row.append(0)
-            else:
-                new_row.append(obs_grid[row][col])
-        new_obs_grid.append(new_row)
-    return new_obs_grid
+    def get_choices(self) -> List[str]: 
+        return self.prompt["choices"]
 
 
 if __name__ == "__main__":
