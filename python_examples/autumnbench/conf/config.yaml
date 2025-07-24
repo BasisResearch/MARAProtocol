@@ -7,12 +7,12 @@ data_dir: "./python_examples/autumnbench/example_benchmark"
 
 # Model configuration
 llm_provider: "openrouter"
-model: "google/gemini-2.5-flash-preview-05-20"
+model: "google/gemini-flash-1.5"
 
 # Agent configuration
-# agent: "autumn_llm_unified_interactive_agent_v1" # LLM-based agent
+agent: "autumn_llm_unified_interactive_agent_v1" # LLM-based agent
 # agent: "autumn_random_interactive_agent_v1" # Random agent
-agent: "autumn_simple_wm_agent" # Oracle autumnSynth agent
+# agent: "autumn_simple_wm_agent" # Oracle autumnSynth agent
 
 use_scratchpad: true
 instruction_type: "reflection"
@@ -29,8 +29,7 @@ skip_frames: false
 per_env_max_steps: 100
 render_mode: "text"
 
-# task_name: "mfp" # mfp, dd, planning
-task_name: "dd" # mfp, dd, planning
+task_name: "cd" # mfp, cd, planning
 envs: [
     "ice",
 ]

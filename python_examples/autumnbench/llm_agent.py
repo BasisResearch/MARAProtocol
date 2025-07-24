@@ -73,14 +73,14 @@ class ReactVLMAgent(agent_grpc.MARAAgentServicer):
         imgs = None
         if observation.image_data != b'':
             try:
-                # Try to decode as JSON first (for MCQ with options)
+                # Try to decode as JSON first (for MFP with options)
                 image_json_str = observation.image_data.decode('utf-8')
                 image_data = json.loads(image_json_str)
                 if "options" in image_data and "grid" in image_data:
-                    # This is MCQ data with options
+                    # This is MFP data with options
                     imgs = image_data["options"] + [image_data["grid"]]
                 elif "grid" in image_data and "goal_state" in image_data:
-                    # This is ActionPredictionEnvironment data with grid and goal state
+                    # This is PlanningEnvironment data with grid and goal state
                     imgs = [image_data["grid"], image_data["goal_state"]]
                 else:
                     # Regular single image
@@ -107,12 +107,12 @@ class ReactVLMAgent(agent_grpc.MARAAgentServicer):
             })
         else:
             if imgs is not None and len(imgs) > 1:
-                # Check if this is MCQ with options or ActionPrediction with goal state
+                # Check if this is MFP with options or Planning with goal state
                 try:
                     image_json_str = observation.image_data.decode('utf-8')
                     image_data = json.loads(image_json_str)
                     if "options" in image_data and "grid" in image_data:
-                        # MCQ case with options
+                        # MFP case with options
                         content_parts = [
                             {
                                 "type": "text",
@@ -137,7 +137,7 @@ class ReactVLMAgent(agent_grpc.MARAAgentServicer):
                                 }
                             ])
                     elif "grid" in image_data and "goal_state" in image_data:
-                        # ActionPrediction case with goal state
+                        # Planning case with goal state
                         content_parts = [
                             {
                                 "type": "text",
@@ -255,7 +255,7 @@ class ReactVLMAgent(agent_grpc.MARAAgentServicer):
 
         if not response or "action" not in response or "thought" not in response:
             return agent_pb2.ActResponse(
-                action=env_pb2.Action(text_data="NOP"),
+                action=env_pb2.Action(text_data="noop"),
                 confidence=0.5,
                 metadata={"strategy": "fallback"}
             )
@@ -433,7 +433,7 @@ class SummaryReactLLMAgent(agent_grpc.MARAAgentServicer):
 
         if not response or "action" not in response or "thought" not in response:
             return agent_pb2.ActResponse(
-                action=env_pb2.Action(text_data="NOP"),
+                action=env_pb2.Action(text_data="noop"),
                 confidence=0.5,
                 metadata={"strategy": "fallback"}
             )
@@ -583,7 +583,7 @@ class ReactLLMAgent2(agent_grpc.MARAAgentServicer):
 
         if not response or "action" not in response or "thought" not in response:
             return agent_pb2.ActResponse(
-                action=env_pb2.Action(text_data="NOP"),
+                action=env_pb2.Action(text_data="noop"),
                 confidence=0.5,
                 metadata={"strategy": "fallback"}
             )
@@ -728,7 +728,7 @@ class ReactLLMAgentServicer(agent_grpc.MARAAgentServicer):
         response = extract_tagged_response(response)
         if not response or "action" not in response or "thought" not in response:
             # Fallback to a safe default if parsing fails
-            return "Could not determine next action", env_pb2.Action(text_data="NOP")
+            return "Could not determine next action", env_pb2.Action(text_data="noop")
         
         # Create the action directly from the response
         action = env_pb2.Action(text_data=response["action"])
@@ -773,7 +773,7 @@ class ReactLLMAgentServicer(agent_grpc.MARAAgentServicer):
                 if not response or "action" not in response or "thought" not in response:
                     # Fallback to a safe default
                     return agent_pb2.ActResponse(
-                        action=env_pb2.Action(text_data="NOP"),
+                        action=env_pb2.Action(text_data="noop"),
                         confidence=0.5,
                         metadata={"strategy": "fallback"}
                     )
@@ -791,7 +791,7 @@ class ReactLLMAgentServicer(agent_grpc.MARAAgentServicer):
             logger.error(f"Error in Act: {e}")
             # Fallback to a safe default action
             return agent_pb2.ActResponse(
-                action=env_pb2.Action(text_data="NOP"),
+                action=env_pb2.Action(text_data="noop"),
                 confidence=0.5,
                 metadata={"strategy": "error_fallback"}
             )
@@ -843,7 +843,7 @@ class UnifiedReactAgent(ReactLLMAgentServicer):
         self.use_scratchpad = request.config.get("use_scratchpad", "false").lower() == "true"
         self.instruction_type = request.config.get("instruction_type", "react")
         self.hint = request.config.get("hint", "false").lower() == "true"
-        self.task_name = request.config.get("task_name", "mcq")
+        self.task_name = request.config.get("task_name", "mfp")
 
         return agent_pb2.AgentInitializeResponse(
             success=True,
@@ -923,16 +923,16 @@ class UnifiedReactAgent(ReactLLMAgentServicer):
         
         if observation.image_data != b'':
             try:
-                # Try to decode as JSON first (for MCQ with options)
+                # Try to decode as JSON first (for MFP with options)
                 image_json_str = observation.image_data.decode('utf-8')
                 image_data = json.loads(image_json_str)
                 if "options" in image_data and "grid" in image_data:
-                    # This is MCQ data with options
+                    # This is MFP data with options
                     imgs = image_data["options"] + [image_data["grid"]]
                     contains_options = True
                     contains_img = True
                 elif "grid" in image_data and "goal_state" in image_data:
-                    # This is MCQ data with options
+                    # This is MFP data with options
                     imgs = [image_data["grid"], image_data["goal_state"]]
                     contains_goal_state = True
                     contains_img = True
@@ -1036,7 +1036,7 @@ class UnifiedReactAgent(ReactLLMAgentServicer):
         if "action" in response_json:
             action = response_json["action"]
         else:
-            action = "NOP"
+            action = "noop"
         self.actions.append(action)
         if "scratchpad_add" in response_json:
             scratchpad_add = response_json["scratchpad_add"]

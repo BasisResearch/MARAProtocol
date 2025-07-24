@@ -15,8 +15,8 @@ from generated.mara import mara_agent_pb2 as agent_pb2
 from generated.mara import mara_agent_pb2_grpc as agent_grpc
 from generated.mara import mara_evaluation_controller_pb2 as controller_pb2
 from generated.mara import mara_evaluation_controller_pb2_grpc as controller_grpc
-from .environment_interfaces import MARACompositeAutumnDefectDetectionServicer, MARACompositeAutumnActionPredictionServicer
-from .environment_interfaces_mcq import MARACompositeAutumnMCQServicer
+from .environment_interfaces import MARACompositeAutumnChangeDetectionServicer, MARACompositeAutumnPlanningServicer
+from .environment_interfaces_mfp import MARACompositeAutumnMFPServicer
 from .agent import MARARandomAgentServicer
 from .llm_agent import ReactLLMAgentServicer, ReactLLMAgent2, SummaryReactLLMAgent, ReactVLMAgent, UnifiedReactAgent
 from .simple_wm_agent import SimpleWMAgentServicer
@@ -257,11 +257,11 @@ class EvaluationControllerNoServer:
             # Create environment stub
             env_stub = None
             if "_mfp" in env_id:
-                env_stub = MARACompositeAutumnMCQServicer()
-            elif "_dd" in env_id:
-                env_stub = MARACompositeAutumnDefectDetectionServicer()
+                env_stub = MARACompositeAutumnMFPServicer()
+            elif "_cd" in env_id:
+                env_stub = MARACompositeAutumnChangeDetectionServicer()
             elif "_planning" in env_id:
-                env_stub = MARACompositeAutumnActionPredictionServicer()
+                env_stub = MARACompositeAutumnPlanningServicer()
             else:
                 logger.error(f"No environment stub found for {env_id}")
                 return 0.0, "error", f"No environment stub found for {env_id}"
@@ -323,7 +323,7 @@ class EvaluationControllerNoServer:
                         "hint":
                         str(self.config.get("hint", False)),
                         "task_name":
-                        self.config.get("task_name", "mcq"),
+                        self.config.get("task_name", "mfp"),
                         "stack_frames":
                         str(self.config.get("stack_frames", 0)),
                         "skip_frames":
@@ -531,21 +531,21 @@ class EvaluationController:
         # Only use the text adventure environment on its actual port
         self.environments = {
             **{
-                f"{eid}_interactive_mcq": f"localhost:{port}"
+                f"{eid}_interactive_mfp": f"localhost:{port}"
                 for eid, port in zip(
                     environment_ids,
                     range(50050, 50050 + len(environment_ids) * 3, 3))
             },
-            # **{f"{eid}_interactive_dd": f"localhost:{port}" for eid, port in zip(environment_ids, range(50051, 50051 + len(environment_ids)*3, 3))},
+            # **{f"{eid}_interactive_cd": f"localhost:{port}" for eid, port in zip(environment_ids, range(50051, 50051 + len(environment_ids)*3, 3))},
         }
         print(f"Environments: {environment_ids}")
         self.transitions = {
             **{
-                f"{environment_ids[eid]}_interactive_mcq": {
-                    "default": f"{environment_ids[eid + 1]}_interactive_mcq",
-                    "quit": f"{environment_ids[eid + 1]}_interactive_mcq",
-                    "finish": f"{environment_ids[eid + 1]}_interactive_mcq",
-                    "fail": f"{environment_ids[eid + 1]}_interactive_mcq",
+                f"{environment_ids[eid]}_interactive_mfp": {
+                    "default": f"{environment_ids[eid + 1]}_interactive_mfp",
+                    "quit": f"{environment_ids[eid + 1]}_interactive_mfp",
+                    "finish": f"{environment_ids[eid + 1]}_interactive_mfp",
+                    "fail": f"{environment_ids[eid + 1]}_interactive_mfp",
                 }
                 for eid in range(len(environment_ids) - 1)
             },
@@ -553,42 +553,42 @@ class EvaluationController:
 
         self.transition_messages = {
             **{
-                f"{environment_ids[eid]}_interactive_mcq": {
-                    "default": f"{environment_ids[eid + 1]}_interactive_mcq",
-                    "quit": f"{environment_ids[eid + 1]}_interactive_mcq",
-                    "finish": f"{environment_ids[eid + 1]}_interactive_mcq",
-                    "fail": f"{environment_ids[eid + 1]}_interactive_mcq",
+                f"{environment_ids[eid]}_interactive_mfp": {
+                    "default": f"{environment_ids[eid + 1]}_interactive_mfp",
+                    "quit": f"{environment_ids[eid + 1]}_interactive_mfp",
+                    "finish": f"{environment_ids[eid + 1]}_interactive_mfp",
+                    "fail": f"{environment_ids[eid + 1]}_interactive_mfp",
                 }
                 for eid in range(len(environment_ids) - 1)
             },
         }
 
         # self.transitions = {
-        #     **{f"{eid}_interactive_mcq": {
-        #         "default": f"{eid}_interactive_dd",
-        #         "quit": f"{eid}_interactive_dd",
-        #         "finish": f"{eid}_interactive_dd",
-        #         "fail": f"{eid}_interactive_dd",
+        #     **{f"{eid}_interactive_mfp": {
+        #         "default": f"{eid}_interactive_cd",
+        #         "quit": f"{eid}_interactive_cd",
+        #         "finish": f"{eid}_interactive_cd",
+        #         "fail": f"{eid}_interactive_cd",
         #     } for eid in environment_ids},
-        #     **{f"{environment_ids[eid]}_interactive_dd": {
-        #         "default": f"{environment_ids[eid + 1]}_interactive_mcq",
-        #         "quit": f"{environment_ids[eid + 1]}_interactive_mcq",
-        #         "finish": f"{environment_ids[eid + 1]}_interactive_mcq",
-        #         "fail": f"{environment_ids[eid + 1]}_interactive_mcq",
+        #     **{f"{environment_ids[eid]}_interactive_cd": {
+        #         "default": f"{environment_ids[eid + 1]}_interactive_mfp",
+        #         "quit": f"{environment_ids[eid + 1]}_interactive_mfp",
+        #         "finish": f"{environment_ids[eid + 1]}_interactive_mfp",
+        #         "fail": f"{environment_ids[eid + 1]}_interactive_mfp",
         #     } for eid in range(len(environment_ids) - 1)},
         # }
         # self.transition_messages = {
-        #     **{f"{eid}_interactive_mcq": {
-        #         "default": f"{eid}_interactive_dd",
-        #         "quit": f"{eid}_interactive_dd",
-        #         "finish": f"{eid}_interactive_dd",
-        #         "fail": f"{eid}_interactive_dd",
+        #     **{f"{eid}_interactive_mfp": {
+        #         "default": f"{eid}_interactive_cd",
+        #         "quit": f"{eid}_interactive_cd",
+        #         "finish": f"{eid}_interactive_cd",
+        #         "fail": f"{eid}_interactive_cd",
         #     } for eid in environment_ids},
-        #     **{f"{environment_ids[eid]}_interactive_dd": {
-        #         "default": f"{environment_ids[eid]}_interactive_mcq",
-        #         "quit": f"{environment_ids[eid]}_interactive_mcq",
-        #         "finish": f"{environment_ids[eid]}_interactive_mcq",
-        #         "fail": f"{environment_ids[eid]}_interactive_mcq",
+        #     **{f"{environment_ids[eid]}_interactive_cd": {
+        #         "default": f"{environment_ids[eid]}_interactive_mfp",
+        #         "quit": f"{environment_ids[eid]}_interactive_mfp",
+        #         "finish": f"{environment_ids[eid]}_interactive_mfp",
+        #         "fail": f"{environment_ids[eid]}_interactive_mfp",
         #     } for eid in range(len(environment_ids) - 1)},
         # }
         self.agents = {
@@ -762,10 +762,12 @@ class EvaluationController:
 
             # Create environment stub
             env_stub = None
-            if "_mcq" in env_id:
-                env_stub = MARACompositeAutumnMCQServicer()
-            elif "_dd" in env_id:
-                env_stub = MARACompositeAutumnServicer()
+            if "_mfp" in env_id:
+                env_stub = MARACompositeAutumnMFPServicer()
+            elif "_cd" in env_id:
+                env_stub = MARACompositeAutumnChangeDetectionServicer()
+            elif "_planning" in env_id:
+                env_stub = MARACompositeAutumnPlanningServicer()
             else:
                 logger.error(f"No environment stub found for {env_id}")
                 return 0.0, "error", f"No environment stub found for {env_id}"

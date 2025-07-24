@@ -146,7 +146,7 @@ class InteractiveEnvironment:
         return self.is_terminal
 
 
-class DefectDetectionEnvironment:
+class ChangeDetectionEnvironment:
 
     def __init__(self, env_name):
         self.prog = open(f"{CURR_DIR}/modified_programs/{env_name}_wrong.sexp",
@@ -235,7 +235,7 @@ class DefectDetectionEnvironment:
             self.inited = True
             return env_pb2.Observation(
                 text_data=
-                "Welcome, you will now be playing an Autumn defect detection environment."
+                "Welcome, you will now be playing an Autumn change detection environment."
                 +
                 "Remember what you see and how different the environment is from the normal Autumn environment."
                 +
@@ -251,7 +251,7 @@ class DefectDetectionEnvironment:
         return self.is_terminal
 
 
-class DDSliderEnvironment:
+class CDSliderEnvironment:
 
     def __init__(self,
                  env_name,
@@ -294,8 +294,8 @@ class DDSliderEnvironment:
         self.inited = False
         if not os.path.exists(f"{self.logging_path}/{self.env_name}"):
             os.makedirs(f"{self.logging_path}/{self.env_name}")
-        if not os.path.exists(f"{self.logging_path}/{self.env_name}/dd"):
-            os.makedirs(f"{self.logging_path}/{self.env_name}/dd")
+        if not os.path.exists(f"{self.logging_path}/{self.env_name}/cd"):
+            os.makedirs(f"{self.logging_path}/{self.env_name}/cd")
 
     def get_action_space(self) -> List[env_pb2.Action]:
         if self.state == "interactive":
@@ -406,9 +406,9 @@ class DDSliderEnvironment:
             self.inited = True
             return env_pb2.Observation(
                 text_data=
-                "The interaction phase is now over. You will now interact with a defective version of the environment - where one of the dynamics rules has been changed. Your goal is to use you understanding of the environemnt from the interaction phase to detect the fault."
+                "The interaction phase is now over. You will now interact with a changed version of the environment - where one of the dynamics rules has been changed. Your goal is to use you understanding of the environemnt from the interaction phase to detect the fault."
                 +
-                "Once you have detected the fault, you can either select 'The fault is here!' to select the current frame as the one where the defect appears and terminate the environment and get your score. You can click 'I found the fault!', you will be allowed to choose, from the frames that you have seen so far, the frame that contains the fault. After choosing the frame you can click 'The fault is here!' to terminate the environment and get your score."
+                "Once you have detected the fault, you can either select 'The fault is here!' to select the current frame as the one where the change appears and terminate the environment and get your score. You can click 'I found the fault!', you will be allowed to choose, from the frames that you have seen so far, the frame that contains the fault. After choosing the frame you can click 'The fault is here!' to terminate the environment and get your score."
                 +
                 "Then you will be asked to choose the frame in which the fault is located."
             )
@@ -422,7 +422,7 @@ class DDSliderEnvironment:
                 render_img_str = render_grid_matplotlib(
                     render_dict,
                     output_path=
-                    f"{self.logging_path}/{self.env_name}/dd/dd_{self.time}.jpeg"
+                    f"{self.logging_path}/{self.env_name}/cd/cd_{self.time}.jpeg"
                 )
                 render_img_bytes = base64.b64decode(render_img_str)
                 return env_pb2.Observation(
@@ -476,7 +476,7 @@ class DDSliderEnvironment:
         return self.is_terminal
 
 
-class ActionPredictionEnvironment:
+class PlanningEnvironment:
 
     def __init__(self,
                  env_name,
@@ -540,7 +540,7 @@ class ActionPredictionEnvironment:
         #     return observation, 0, self.is_terminal, {}
         if action.text_data == "submit":
             self.is_terminal = True
-            observation = self.action_prediction_observation()
+            observation = self.planning_observation()
             reward = 1 if observation.text_data == "You have successfully predicted the action." else -1
             return observation, reward, self.is_terminal, {}
         else:
@@ -558,7 +558,7 @@ class ActionPredictionEnvironment:
         return env_pb2.Observation(
             text_data="You quit the environment. No reward will be given.")
 
-    def action_prediction_observation(self) -> env_pb2.Observation:
+    def planning_observation(self) -> env_pb2.Observation:
         render_dict = json.loads(self.interpreter.render_all())
         # render_dict = render_grid(render_dict)
         grid_matrix = render_grid_to_matrix(render_dict)
@@ -621,7 +621,7 @@ class ActionPredictionEnvironment:
         return self.is_terminal
 
 
-class MARAMCQEnvironment:
+class MARAMFPEnvironment:
 
     def __init__(self,
                  env_name,
@@ -644,7 +644,7 @@ class MARAMCQEnvironment:
             self.answer_answer_idx = json.load(f)["correct_idx"]
         self.is_terminal = False
         self.is_finished = False
-        # self.data = json.load(open(f"{self.data_dir}/tasks/prompts/{self.env_name}_mcq.json"))
+        self.data = json.load(open(f"{self.data_dir}/prompts/{self.env_name}_mfp.json"))
         self.current_time = 0
         self.current_question = 0
         self.options = None
@@ -654,63 +654,8 @@ class MARAMCQEnvironment:
         self.colors_str_to_int = {v: k for k, v in self.colors.items()}
         if not os.path.exists(f"{self.logging_path}/{self.env_name}"):
             os.makedirs(f"{self.logging_path}/{self.env_name}")
-        if not os.path.exists(f"{self.logging_path}/{self.env_name}/mcq"):
-            os.makedirs(f"{self.logging_path}/{self.env_name}/mcq")
-        self.parse_actions_and_update_task_dict()
-
-    def parse_actions_and_update_task_dict(self) -> None:
-        """Update the task_dict with masked_grid observations and gt answer 
-        grid."""
-        seed = int(self.task_dict.get("seed", 42))
-        interpreter = Interpreter()
-        interpreter.run_script(self.prog, autumnstdlib, "", seed)
-
-        # Process observations
-        actions_and_masks = self.task_dict["observations"]
-
-        obss = [{"masked_grid": self.task_dict["observations"][0]["masked_grid"]}]
-
-        # prev_obs = None
-        for _, action_and_mask in enumerate(actions_and_masks[1:]):
-
-            action = action_and_mask.get(
-                "action", {"type": "noop"}
-            ) 
-
-            action_type = action.get("type", "")
-            action_y = action.get("y", None)
-            action_x = action.get("x", None)
-
-            # Execute the action to get observation
-            if action_type == "left":
-                interpreter.left()
-            elif action_type == "right":
-                interpreter.right()
-            elif action_type == "up":
-                interpreter.up()
-            elif action_type == "down":
-                interpreter.down()
-            elif action_type == "noop":
-                pass
-            elif action_type == "click" and action_y is not None and\
-                action_x is not None:
-                interpreter.click(action_x, action_y)
-            else:
-                # Skip unrecognized actions
-                continue
-            interpreter.step()
-
-            processed_observation = {
-                "action": action,
-                "masked_grid": action_and_mask["masked_grid"],
-            }
-            # print(f"[green]Processed observation at time {t}: {processed_observation}[/green]")
-            # print(f"mask {mask}")
-            obss.append(processed_observation)
-
-        self.task_dict["observations"] = obss
-        self.task_dict["answer"] = {"correct_idx": self.answer_answer_idx}
-        self.task_dict.pop("seed", None)
+        if not os.path.exists(f"{self.logging_path}/{self.env_name}/mfp"):
+            os.makedirs(f"{self.logging_path}/{self.env_name}/mfp")
 
     def get_action_space(self) -> List[env_pb2.Action]:
         # If not finished
@@ -752,7 +697,7 @@ class MARAMCQEnvironment:
                 options = [convert_text_color(option) for option in options]
                 return env_pb2.Observation(
                     text_data=json.dumps({
-                        "video_location": self.current_time,
+                        "video_location": str(self.current_time)+"/"+str(len(self.task_dict["observations"])-1),
                         "render": color_grid,
                         "action_took": action_took,
                         "options": options,
@@ -768,7 +713,7 @@ class MARAMCQEnvironment:
 \"is_finished\": whether the episode is finished.
 You will step through the trajectory one frame at a time. Towards the end of the trajectory, parts of the grid will be masked (where the masked locations are marked as `mask`) and you will be given a set of options to fill in the masked region at the final timestep. You need to choose option that fits the masked region at the final timestep.\n"""+\
                     json.dumps({
-                        "video_location": self.current_time,
+                        "video_location": str(self.current_time)+"/"+str(len(self.task_dict["observations"])-1),
                         "render": color_grid,
                         # "action_took": action_took,
                         "is_finished": self.is_finished,})
@@ -784,7 +729,7 @@ You will step through the trajectory one frame at a time. Towards the end of the
                         action_took = self.task_dict["observations"][
                             self.current_time]["action"]["type"]
                     text_data = json.dumps({
-                        "video_location": self.current_time,
+                        "video_location": str(self.current_time)+"/"+str(len(self.task_dict["observations"])-1),
                         "render": color_grid,
                         "action_took": action_took,
                         "is_finished": self.is_finished,
@@ -798,13 +743,13 @@ You will step through the trajectory one frame at a time. Towards the end of the
                     render_string_grid_matplotlib(
                         option,
                         output_path=
-                        f"{self.logging_path}/{self.env_name}/mcq/mcq_option_{i}.jpeg"
+                        f"{self.logging_path}/{self.env_name}/mfp/mfp_option_{i}.jpeg"
                     ) for i, option in enumerate(options)
                 ]
                 grid_image = render_string_grid_matplotlib(
                     color_grid,
                     output_path=
-                    f"{self.logging_path}/{self.env_name}/mcq/mcq_render_{self.current_time}.jpeg"
+                    f"{self.logging_path}/{self.env_name}/mfp/mfp_render_{self.current_time}.jpeg"
                 )
 
                 # Create a JSON structure with all images
@@ -822,7 +767,7 @@ You will step through the trajectory one frame at a time. Towards the end of the
                         "type"]
                 return env_pb2.Observation(
                     text_data=json.dumps({
-                        "video_location": self.current_time,
+                        "video_location": str(self.current_time)+"/"+str(len(self.task_dict["observations"])-1),
                         "action_took": action_took,
                         "is_finished": self.is_finished,
                     }),
@@ -847,7 +792,7 @@ You will step through the trajectory one frame at a time. Towards the end of the
                                            \"is_finished\": whether the episode is finished.
                                            You will step through the trajectory one frame at a time. Towards the end of the trajectory, you will be given masked states (where the masked locations are colored slategrey) and at the end of the trajectory, you will be given a set of options to fill in the masked region. You need to choose the correct option.\n"""
                     + json.dumps({
-                        "video_location": self.current_time,
+                        "video_location": str(self.current_time)+"/"+str(len(self.task_dict["observations"])-1),
                         "action_took": action_took,
                         "is_finished": self.is_finished,
                     }),
@@ -855,11 +800,11 @@ You will step through the trajectory one frame at a time. Towards the end of the
                         render_string_grid_matplotlib(
                             color_grid,
                             output_path=
-                            f"{self.logging_path}/{self.env_name}/mcq/mcq_render_{self.current_time}.jpeg"
+                            f"{self.logging_path}/{self.env_name}/mfp/mfp_render_{self.current_time}.jpeg"
                         ))
                 ) if self.current_time == 0 else env_pb2.Observation(
                     text_data=json.dumps({
-                        "video_location": self.current_time,
+                        "video_location": str(self.current_time)+"/"+str(len(self.task_dict["observations"])-1),
                         "action_took": action_took,
                         "is_finished": self.is_finished,
                     }),
@@ -867,7 +812,7 @@ You will step through the trajectory one frame at a time. Towards the end of the
                         render_string_grid_matplotlib(
                             color_grid,
                             output_path=
-                            f"{self.logging_path}/{self.env_name}/mcq/mcq_render_{self.current_time}.jpeg"
+                            f"{self.logging_path}/{self.env_name}/mfp/mfp_render_{self.current_time}.jpeg"
                         )))
 
     def terminal(self):
@@ -995,7 +940,7 @@ def apply_mask(obs_grid: List[List[int]],
 
 
 if __name__ == "__main__":
-    env = ActionPredictionEnvironment("space_invaders")
+    env = PlanningEnvironment("space_invaders")
     print(env.get_action_space())
     print(env.get_observation())
     print(env.step(env.get_action_space()[0]))

@@ -38,7 +38,7 @@ class SimpleWMAgent:
     def __init__(self, config: dict):
         """Initializes the agent with configuration and sets up the initial state."""
         self.config = config
-        self.task_name = self.config.get("task_name", "mcq")
+        self.task_name = self.config.get("task_name", "mfp")
         self.num_samples_mc = int(self.config.get("num_samples_mc", 1))
         self.history = {}
         self.phase = 'interaction'  # Initialize phase
@@ -113,10 +113,10 @@ class SimpleWMAgent:
                 expanded_actions.append(action)
         return expanded_actions
 
-    def _act_mcq_eval(
+    def _act_mfp_eval(
             self, obs: Dict[str, Any],
             available_actions: list[env_pb2.Action]) -> env_pb2.Action:
-        """Selects an MCQ choice using the specified Monte Carlo strategy."""
+        """Selects an MFP choice using the specified Monte Carlo strategy."""
         if len(available_actions) == 1:
             # Not at the stage of making a choice yet, save the action and
             # store the observation
@@ -136,14 +136,14 @@ class SimpleWMAgent:
                 final_state = self._simulate_for_consistent_final_state(
                     self.history["observations"], self.history["actions"])
                 final_states.append(final_state)
-            choice = self._make_mcq_choice(final_states, obs['obs_state'],
+            choice = self._make_mfp_choice(final_states, obs['obs_state'],
                                            obs['options'])
             return env_pb2.Action(text_data=f"choose_option_{choice}")
 
-    def _act_dd_eval(
+    def _act_cd_eval(
             self, obs: Observation,
             available_actions: list[env_pb2.Action]) -> env_pb2.Action:
-        """Acts in the DD evaluation phase.
+        """Acts in the CD evaluation phase.
         A simpler solver for defect detection. It compars the received 
         observation with the observation predicted from its world model, and 
         declare defect is here if they differ.
@@ -201,7 +201,7 @@ class SimpleWMAgent:
             logger.info(f"Phase transition triggered in agent. New phase: "
                         f"'{self.phase}'.")
             # Choose the default action to enter the evaluation phase
-            if self.task_name == 'mcq':
+            if self.task_name == 'mfp':
                 start = observation.text_data.find('{')
                 observation.text_data = observation.text_data[start:]
             else:
@@ -214,7 +214,7 @@ class SimpleWMAgent:
         elif self.phase == 'evaluation':
             if self.task_name == 'mfp':
                 obs_dict = parse_text_obs_to_dict(observation.text_data)
-                action = self._act_mcq_eval(obs_dict, available_actions)
+                action = self._act_mfp_eval(obs_dict, available_actions)
             elif self.task_name == 'dd':
                 # If the option `The fault is here!` is available, it means
                 # the agent has found the previous observation to be a defect.
@@ -228,7 +228,7 @@ class SimpleWMAgent:
                 obs_str = observation.text_data.strip('"\'').replace(
                     '\\n', '\n')
                 obs_arr = _str_grid_to_ndarray(obs_str)
-                action = self._act_dd_eval(obs_arr, available_actions)
+                action = self._act_cd_eval(obs_arr, available_actions)
             elif self.task_name == 'planning':
                 data_dict = json.loads(observation.text_data)
                 goal, mask, render = data_dict["goal"],\
@@ -263,7 +263,7 @@ class SimpleWMAgent:
         """**Placeholder**: Checks if the current observation indicates a defect."""
         raise NotImplementedError
 
-    def _make_mcq_choice(self, sampled_trajectories: List[Observation],
+    def _make_mfp_choice(self, sampled_trajectories: List[Observation],
                          observations: Observation,
                          choices: List[Observation]) -> int:
         num_matching = [0] * len(choices)
@@ -280,7 +280,7 @@ class SimpleWMAgent:
         return sampled_trajectory == real_observations
 
     def _are_obs_content_equal(self, obs_object, choice_content):
-        """**Placeholder**: Compares a final state with an MCQ choice."""
+        """**Placeholder**: Compares a final state with an MFP choice."""
         return False
 
 
@@ -299,9 +299,9 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
         self.experiment_seed = int(config.get("seed"))
         random.seed(self.experiment_seed)
         if str(config.get("use_oracle_interpreter_seed")).lower() == 'true':
-            if task == "mcq":
+            if task == "mfp":
                 self.interpreter_seed = yaml.safe_load(
-                open(f"{data_dir}/tasks/{env_name}_next_frame_prediction.yaml")
+                open(f"{data_dir}/tasks/{env_name}_mfp.yaml")
                 )["seed"]
             else:
                 self.interpreter_seed = int(config.get("seed"))
@@ -356,7 +356,7 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
                     self.wm.up()
                 elif action == "down":
                     self.wm.down()
-                elif action in ["noop", "NOP"]:
+                elif action in ["noop", "noop"]:
                     pass
                 elif "click" in action:
                     _, x, y = action.split()
@@ -604,7 +604,7 @@ class SimpleWMAgentServicer(agent_grpc.MARAAgentServicer):
             request.reactive_action_space.available_actions)
         if not available_actions:
             return agent_pb2.ActResponse(action=env_pb2.Action(
-                text_data="NOP"))
+                text_data="noop"))
         action = self.agent.act(request.observation, available_actions)
         logger.info(f"SimpleWMAgent action: {action.text_data}")
         return agent_pb2.ActResponse(action=action)

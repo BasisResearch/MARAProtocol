@@ -75,7 +75,7 @@ def get_action_space_interactive(
             for i in range(grid_size):
                 for j in range(grid_size):
                     acts.append(f"click {i} {j}")
-    acts.append("NOP")
+    acts.append("noop")
     return [env_pb2.Action(text_data=act) for act in acts]
 
 
@@ -96,7 +96,7 @@ def interpreter_action_to_text(interpreter: Interpreter, action: str) -> str:
     elif action == "down":
         interpreter.down()
         return True
-    elif action == "NOP":
+    elif action == "noop":
         return True
     return False
 

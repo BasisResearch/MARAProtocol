@@ -27,8 +27,8 @@ def get_environment_ids(data_dir: str, task_name: str):
                 match task_type:
                     case "mask_frame_prediction":
                         environment_ids.append(f"{data['program']}_mfp")
-                    case "defect_detection":
-                        environment_ids.append(f"{data['program']}_dd")
+                    case "change_detection":
+                        environment_ids.append(f"{data['program']}_cd")
                     case "planning":
                         environment_ids.append(f"{data['program']}_planning")
                     case _:

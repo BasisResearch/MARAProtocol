@@ -46,7 +46,7 @@ enum EnvironmentType {
  * What is the difference between reactive and time-dependent?
  * What information providing can make the difference?
  * Has to avoid favoring faster computer.
- * Or keep sending NOP.
+ * Or keep sending noop.
  * Is it just framerate info?
  *   Whether we allow the agent to control the framerate?
  */
