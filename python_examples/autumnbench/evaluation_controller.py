@@ -389,6 +389,7 @@ class EvaluationControllerNoServer:
                             action=act_response.action), None)
                     reward = step_response.reward
                     is_terminal = step_response.is_terminal
+
                     total_reward += reward
                     logger.info(
                         f"Step result: reward={reward}, terminal={is_terminal}"
@@ -436,7 +437,7 @@ class EvaluationControllerNoServer:
                             logger.warning(
                                 f"Unknown terminal condition: {observation_text}"
                             )
-                            # raise ValueError(f"Unknown terminal condition: {observation_text}")
+                            raise ValueError(f"Unknown terminal condition: {observation_text}")
 
             # Episode complete
             logger.info(

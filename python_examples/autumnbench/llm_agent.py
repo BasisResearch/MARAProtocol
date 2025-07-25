@@ -1008,7 +1008,7 @@ class UnifiedReactAgent(ReactLLMAgentServicer):
                 "text": f"""{instructions}"""
             })
         else:
-            content = f"""The current grid is as follows:\n{observation.text_data}\n\n{instructions}"""
+            content = f"""{observation.text_data}\n\n{instructions}"""
         
 
         return {

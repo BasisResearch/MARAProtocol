@@ -3,6 +3,7 @@ import hashlib
 import uuid
 from typing import List, Tuple, Dict, Any, Union
 import random
+import math
 
 import json
 import yaml
@@ -75,7 +76,7 @@ class InteractiveEnvironment:
         if action.text_data == "quit":
             self.is_terminal = True
             observation = self.get_observation()
-            return observation, 0, self.is_terminal, {}
+            return observation, 0, self.is_terminal, {"terminal_condition": "quit"}
         elif action.text_data == "go-to-test":
             self.is_terminal = True
             observation = self.get_observation()
@@ -140,11 +141,11 @@ class InteractiveEnvironment:
             render_dict = render_grid(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
             if self.render_mode == "text":
                 return env_pb2.Observation(
-                    text_data=self.get_instruction_text() + " Here is the initial state of the grid: " + json.dumps(render_dict)
+                    text_data=self.get_instruction_text() + "\nHere is the initial state of the grid: \n" + json.dumps(render_dict)
                 )
             elif self.render_mode == "image":
                 return env_pb2.Observation(
-                    text_data=self.get_instruction_text() + " Here is the initial state of the grid: ",
+                    text_data=self.get_instruction_text() + "\nHere is the initial state of the grid: \n",
                     image_data=render_img_bytes,
                 )
             else:
@@ -162,7 +163,7 @@ class InteractiveEnvironment:
             return env_pb2.Observation(text_data=json.dumps(render_dict))
         elif self.render_mode == "image":
             return env_pb2.Observation(
-                text_data="Here is the current frame: ", image_data=render_img_bytes
+                text_data="Here is the current frame: \n", image_data=render_img_bytes
             )
         else:
             raise ValueError(f"Invalid render mode: {self.render_mode}")
@@ -170,8 +171,8 @@ class InteractiveEnvironment:
     def get_instruction_text(self):
         # task_descriptions = {
         #     "planning": "In the test phase, you will solve a planning task in the environment you interacted with using your understanding of the dynamics of the environment. You will be given a goal state as well as a highlight mask. Your aim is to interact in the environment such that the highlighted region (i.e. where values are 1) of the grid matches the goal state. If you want to quit, click 'quit'. If you want to submit, click 'submit'. You will be penalized if you click 'submit' before the goal state is reached. You will be told if you have reached the goal state or not. Think carefully about the goal to be reached and your understanding of the environment before taking any actions as you might get stuck.",
-        #     "defect_detection": "In the test phase, you will interact with a defective version of the environment - where one of the dynamics rules has been changed. Your goal is to use you understanding of the environemnt from the interaction phase to detect the fault. The environment will start in a normal state and then at some point, the environment will transition to a defective state. As soon as you detect the fault, you have to select 'Fault!' action to terminate the environment. You will be penalized if you click 'Fault!' before the fault is detected.",
-        #     "next_frame_prediction": "In the test phase, you will step through frames from a trajectory in this same environment you interacted with. Each frame is structured as a json object with the following fields: \"render\": the grid observed, \"video_location\": timestep at which the frame was observed, \"action_took\": action taken at this timestep, \"is_finished\": whether the episode is finished. IMPORTANT: You must step through ALL frames in the trajectory before making any choice. Use the `step` action to advance through each frame one at a time. You can use your scratchpad to record your thoughts and observations as you go through the frames. Pay attention to patterns, movements, and how the environment evolves over time. Towards the end of the trajectory, parts of the grid will be masked (where the masked locations are marked as `mask`) and you will be given a set of options to fill in the masked region at the final timestep. Only after stepping through all frames should you choose the option that fits the masked region at the final timestep.",
+        #     "cd": "In the test phase, you will interact with a defective version of the environment - where one of the dynamics rules has been changed. Your goal is to use you understanding of the environemnt from the interaction phase to detect the change. The environment will start in a normal state and then at some point, the environment will transition to a defective state. As soon as you detect the change, you have to select 'Fault!' action to terminate the environment. You will be penalized if you click 'Fault!' before the change is detected.",
+        #     "mfp": "In the test phase, you will step through frames from a trajectory in this same environment you interacted with. Each frame is structured as a json object with the following fields: \"render\": the grid observed, \"video_location\": timestep at which the frame was observed, \"action_took\": action taken at this timestep, \"is_finished\": whether the episode is finished. IMPORTANT: You must step through ALL frames in the trajectory before making any choice. Use the `step` action to advance through each frame one at a time. You can use your scratchpad to record your thoughts and observations as you go through the frames. Pay attention to patterns, movements, and how the environment evolves over time. Towards the end of the trajectory, parts of the grid will be masked (where the masked locations are marked as `mask`) and you will be given a set of options to fill in the masked region at the final timestep. Only after stepping through all frames should you choose the option that fits the masked region at the final timestep.",
         # }
         
         # task_description = task_descriptions.get(self.task_name, self.task_name)
@@ -198,7 +199,7 @@ class ChangeDetectionEnvironment:
             "r").read()
         self.is_terminal = False
         self.triggering_state = False
-        self.trigger_start_time = None
+        self.trigger_start_time = None # the trigger frame is not set yet
         self.frames = []
         self.id = str(uuid.uuid4())
         self.inited = False
@@ -207,7 +208,7 @@ class ChangeDetectionEnvironment:
         self.interpreter = Interpreter()
         self.interpreter.run_script(self.prog, autumnstdlib, self.event)
         self.triggering_state = False
-        self.trigger_start_time = None
+        self.trigger_start_time = None # the trigger frame is not set yet
         self.inited = False
 
     def get_action_space(self) -> List[env_pb2.Action]:
@@ -232,8 +233,8 @@ class ChangeDetectionEnvironment:
             return observation, 0, self.is_terminal, {}
         if action.text_data == "Fault!":
             self.is_terminal = True
-            observation = self.fault_observation()
-            return observation, self.fault_reward(), self.is_terminal, {}
+            observation = self.change_observation()
+            return observation, self.change_reward(), self.is_terminal, {}
         else:
             if not interpreter_action_to_text(self.interpreter,
                                               action.text_data):
@@ -247,26 +248,26 @@ class ChangeDetectionEnvironment:
             logger.debug(f"Observation: {observation} for id: {self.id}")
             return observation, 0, self.is_terminal, {}
 
-    def fault_observation(self) -> env_pb2.Observation:
+    def change_observation(self) -> env_pb2.Observation:
         orig_observation = self.get_observation()
         text_data = json.loads(orig_observation.text_data)
         if self.triggering_state and self.trigger_start_time:
             return env_pb2.Observation(text_data=json.dumps(
                 {
                     "render": text_data,
-                    "fault": True,
+                    "change": True,
                     "trigger_time": time.time() - self.trigger_start_time,
                     "detect_time": time.time() - self.trigger_start_time
                 }))
         else:
             return env_pb2.Observation(text_data=json.dumps({
                 "render": text_data,
-                "fault": False,
+                "change": False,
                 "trigger_time": 0,
                 "detect_time": 0
             }))
 
-    def fault_reward(self) -> float:
+    def change_reward(self) -> float:
         if self.triggering_state and self.trigger_start_time:
             delta = time.time() - self.trigger_start_time
             return 1 / (1 + delta)
@@ -281,9 +282,9 @@ class ChangeDetectionEnvironment:
                 +
                 "Remember what you see and how different the environment is from the normal Autumn environment."
                 +
-                "Once you have detected the fault, you have to click 'Fault!' to terminate the environment."
+                "Once you have detected the change, you have to click 'Fault!' to terminate the environment."
                 +
-                "You will be penalized if you click 'Fault!' before the fault is detected."
+                "You will be penalized if you click 'Fault!' before the change is detected."
             )
         render_dict = json.loads(self.interpreter.render_all())
         render_dict = render_grid(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
@@ -327,7 +328,7 @@ class CDSliderEnvironment:
         self.interpreter.run_script(self.prog, autumnstdlib, self.event,
                                     self.seed)
         self.triggering_state = False
-        self.trigger_start_time = None
+        self.trigger_start_time = None # the trigger frame is not set yet
         self.frames = []
         self.curr_frame = 0
         self.trigger_frame = -1
@@ -347,17 +348,19 @@ class CDSliderEnvironment:
             action_space = get_action_space_interactive(grid_size,
                                                         time_step=int(
                                                             self.inited))
+            # remove go-to-test action
+            action_space = [action for action in action_space if action.text_data != "go-to-test"]
             if self.time > 2:
                 action_space.append(
-                    env_pb2.Action(text_data="I found the fault!"))
+                    env_pb2.Action(text_data="I found the change!"))
             action_space.append(env_pb2.Action(text_data="quit"))
             return action_space
-        elif self.state == "fault":
+        elif self.state == "change":
             action_space = [
                 env_pb2.Action(text_data=f"choose_frame_{i}")
                 for i in range(len(self.frames))
             ]
-            action_space.append(env_pb2.Action(text_data="The fault is here!"))
+            action_space.append(env_pb2.Action(text_data="Submit choice"))
             action_space.append(env_pb2.Action(text_data="quit"))
             return action_space
         else:
@@ -370,97 +373,107 @@ class CDSliderEnvironment:
         logger.debug(f"Stepping with action: {action} for id: {self.id}")
         self.time += 1
         curr_state = self.triggering_state
-        # Test if fault is triggered
-        self.triggering_state |= ('true' in self.interpreter.evaluate_to_string(
-        self.event))
+        # Test if change is triggered
+        self.triggering_state |= ('true' in self.interpreter.evaluate_to_string(self.event))
         if curr_state != self.triggering_state:
             self.trigger_start_time = self.time
+        self.curr_frame = self.time-1
+        if (action not in self.get_action_space()) and (not action.text_data.startswith("click")): # TODO: ensure we don't allow invalid click actions
+            observation = env_pb2.Observation(text_data="Invalid action. Please select a valid action.")
+            return observation, 0, self.is_terminal, {}
 
+        reward = 0
         if action.text_data == "quit":
             self.is_terminal = True
             self.last_interpreting_action = None
             observation = self.get_observation()
-            reward = 0
-        if action.text_data == "I found the fault!":
-            self.state = "fault"
+            return observation, 0, self.is_terminal, {"terminal_condition": "quit"}
+        elif action.text_data == "I found the change!":
+            self.state = "change"
             self.curr_frame = 0
             self.last_interpreting_action = None
             # Give agent extra chance to choose the frame
             observation = self.get_observation()
-            reward = 0
-        if action.text_data == "The fault is here!":
+        elif action.text_data == "Submit choice":
             self.is_terminal = True
-            if not self.triggering_state:
-                self.triggering_state |= ('true' in self.interpreter.evaluate_to_string(
-                                            self.event))
-                self.trigger_start_time = self.time
             self.last_interpreting_action = None
-            observation = self.fault_observation()
-            self.curr_frame = self.time-1
-            return observation, self.fault_reward(), self.is_terminal, {}
-        if action.text_data.startswith("choose_frame_"):
+            observation = self.change_observation()
+            reward = self.change_reward()
+            return observation, reward, self.is_terminal, {"terminal_condition": "finish"}
+        elif action.text_data.startswith("choose_frame_"):
             self.curr_frame = int(action.text_data.split("_")[-1])
             observation = self.get_observation()
-            reward = 0
+        elif action.text_data == "reset":
+            self.interpreter = Interpreter()
+            self.interpreter.run_script(self.prog, autumnstdlib, self.event,
+                                        self.seed)
+            self.triggering_state = False
+            self.trigger_start_time = None # the trigger frame is not set yet
+            self.frames = []
+            self.curr_frame = 0
         else:
-            last_interpreting_action = action.text_data
+            self.last_interpreting_action = action.text_data
             if not interpreter_action_to_text(self.interpreter,
                                               action.text_data):
                 logger.warning(
                     f"Invalid action: {action.text_data} for id: {self.id}")
                 return self.get_observation(), 0, self.is_terminal, {}
 
-            self.triggering_state |= ('true' in self.interpreter.evaluate_to_string(
-                                        self.event))
+            self.triggering_state |= ('true' in self.interpreter.evaluate_to_string(self.event))            
             if curr_state != self.triggering_state:
-                self.trigger_start_time = self.time + 1
+                self.trigger_start_time = self.time
 
             self.interpreter.step()
             observation = self.get_observation()
             logger.debug(f"Observation: {observation} for id: {self.id}")
-            reward = 0
         self.frames.append(observation)
         return observation, reward, self.is_terminal, {}
 
-    def fault_observation(self) -> env_pb2.Observation:
-        orig_observation = self.get_observation()
-        text_data = json.loads(orig_observation.text_data)
-        if self.triggering_state and self.trigger_start_time:
-            return env_pb2.Observation(text_data=json.dumps(
-                {
-                    "render": text_data,
-                    "fault": True,
-                    "offsets": self.trigger_frame - self.trigger_start_time
-                }))
+    def change_observation(self) -> env_pb2.Observation:
+        # orig_observation = self.get_observation()
+        # text_data = orig_observation.text_data
+        # image_data = orig_observation.image_data
+        if self.trigger_start_time is None:
+            text_data = f"The environment has not changed yet."
+        elif self.triggering_state:
+            text_data = f"The environment has changed! The change offset from the start of the changed behavior is {self.curr_frame - self.trigger_start_time} frames."
         else:
-            return env_pb2.Observation(text_data=json.dumps({
-                "render": text_data,
-                "fault": False,
-                "offsets": 0
-            }))
+            text_data = f"You have not detected the change. The change offset from the start of the changed behavior is {self.curr_frame - self.trigger_start_time} frames."
+        if self.render_mode == "text":
+            return env_pb2.Observation(text_data=text_data)
+        else:
+            raise ValueError(f"Invalid render mode: {self.render_mode}")
 
-    def fault_reward(self) -> float:
-        if self.triggering_state and self.trigger_start_time:
-            delta = self.curr_frame - self.trigger_start_time
-            return 1 / (1 + delta)
-        return -1
+    def change_reward(self) -> float:
+        """Calculate score for change detection task"""
+        if self.trigger_start_time is None:
+            return -1
+        if self.curr_frame < (self.trigger_start_time-1):
+            return -1
+        elif self.curr_frame == (self.trigger_start_time-1) or self.curr_frame == self.trigger_start_time:
+            return 1
+        else:
+            fx = 1 / (1 - self.curr_frame / self.trigger_start_time * math.exp(-self.curr_frame / self.trigger_start_time))
+            return max(0.0, min(1.377 * fx - 1.178, 1.0))
 
     def get_observation(self) -> env_pb2.Observation:
+        text_data = ""
         if not self.inited:
             self.inited = True
-            return env_pb2.Observation(
-                text_data=
-                "The interaction phase is now over. You will now interact with a changed version of the environment - where one of the dynamics rules has been changed. Your goal is to use you understanding of the environemnt from the interaction phase to detect the fault."
-                +
-                "Once you have detected the fault, you can either select 'The fault is here!' to select the current frame as the one where the change appears and terminate the environment and get your score. You can click 'I found the fault!', you will be allowed to choose, from the frames that you have seen so far, the frame that contains the fault. After choosing the frame you can click 'The fault is here!' to terminate the environment and get your score."
-                +
-                "Then you will be asked to choose the frame in which the fault is located."
+            text_data = (
+                "You are now in the test phase." +
+                "You will now interact with a changed version of the environment - where one of the dynamics rules has been changed. " +
+                "Your goal is to use you understanding of the environemnt from the interaction phase to detect the change. The environment will start in a normal state and then at some point, the environment will transition to a defective state. " +
+                "As soon as you detect the change, you have to select 'I found the change!' action to go to the next phase, wherein you have to choose exactly which frame the change occurred, then submit it. You may choose as many times as you want to see the frames. You will be penalized if you click 'I found the change!' before the change is detected. " +
+                "Here is the initial frame: "
             )
+        else:
+            text_data = "Here is the current frame: "
         if self.state == "interactive":
             if self.render_mode == "text":
                 render_dict = json.loads(self.interpreter.render_all())
                 render_dict = render_grid(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
-                return env_pb2.Observation(text_data=json.dumps(render_dict))
+                return env_pb2.Observation(text_data=text_data + json.dumps(render_dict))
             elif self.render_mode == "image":
                 render_dict = json.loads(self.interpreter.render_all())
                 render_img_str = render_grid_matplotlib(
@@ -471,48 +484,23 @@ class CDSliderEnvironment:
                 )
                 render_img_bytes = base64.b64decode(render_img_str)
                 return env_pb2.Observation(
-                    text_data="Here is the current frame: ",
+                    text_data=text_data,
                     image_data=render_img_bytes)
             else:
                 raise ValueError(f"Invalid render mode: {self.render_mode}")
-        elif self.state == "fault":
+        elif self.state == "change":
             if self.render_mode == "text":
-                return env_pb2.Observation(text_data=json.dumps({
-                    "render":
-                    self.frames[self.curr_frame].text_data,
-                    "fault":
-                    True,
-                    "offsets":
-                    abs(self.trigger_frame -
-                        self.curr_frame) if self.trigger_frame !=
-                    -1 else 100_000
-                }))
+                return env_pb2.Observation(text_data=self.frames[self.curr_frame].text_data)
             elif self.render_mode == "image":
-                return env_pb2.Observation(
-                    text_data=json.dumps({
-                        "fault":
-                        True,
-                        "offsets":
-                        abs(self.trigger_frame - self.curr_frame)
-                        if self.trigger_frame != -1 else 100_000
-                    }),
-                    image_data=self.frames[self.curr_frame].image_data)
+                return env_pb2.Observation(text_data=text_data, image_data=self.frames[self.curr_frame].image_data)
             else:
                 raise ValueError(f"Invalid render mode: {self.render_mode}")
         else:
             if self.render_mode == "text":
-                return env_pb2.Observation(text_data=json.dumps(
-                    {
-                        "render": self.frames[self.curr_frame].text_data,
-                        "fault": False,
-                        "offsets": 0
-                    }))
+                return env_pb2.Observation(text_data=self.frames[self.curr_frame].text_data)
             elif self.render_mode == "image":
                 return env_pb2.Observation(
-                    text_data=json.dumps({
-                        "fault": False,
-                        "offsets": 0
-                    }),
+                    text_data=text_data,
                     image_data=self.frames[self.curr_frame].image_data)
             else:
                 raise ValueError(f"Invalid render mode: {self.render_mode}")
@@ -871,6 +859,9 @@ You will step through the trajectory one frame at a time. Towards the end of the
         assert isinstance(action, env_pb2.Action)
         if self.terminal():
             return self.get_observation(), 0, self.terminal(), {}
+        if action not in self.get_action_space():
+            observation = env_pb2.Observation(text_data="Invalid action. Please choose from the available actions.")
+            return observation, 0, self.terminal(), {}
         if action.text_data == "rewind":
             self.current_time -= 1
             if self.current_time < 0:
@@ -892,11 +883,11 @@ You will step through the trajectory one frame at a time. Towards the end of the
                 return observation, 1, self.terminal(), {}
             else:
                 observation = self.get_observation()
-                return observation, 0, self.terminal(), {}
+                return observation, -1, self.terminal(), {}
         elif action.text_data == "quit":
             self.is_terminal = True
             observation = self.get_observation()
-            return observation, 0, self.terminal(), {}
+            return observation, 0, self.terminal(), {"terminal_condition": "quit"}
         else:
             observation = self.get_observation()
             return observation, 0, self.terminal(), {}

@@ -232,10 +232,13 @@ class MARACompositeAutumnChangeDetectionServicer(env_grpc.MARAEnvironmentService
         if self.transiting == "Interactive":
             return self.current_environment.QuerySpaces(request, context)
         elif self.transiting == "Transition" or self.transiting == "ChangeReset":
+            actions = self.interactive_environment.environment.get_action_space()
+            # remove the go-to-test action
+            actions = [action for action in actions if action.text_data != "go-to-test"]
             response = env_service_pb2.SpaceQueryResponse(
                 reactive_response=env_pb2.ReactiveEnvironment.ActionSpaceResponse(
                     action_space=env_pb2.ReactiveEnvironment.ActionSpace(
-                        available_actions=[env_pb2.Action(text_data="noop")]
+                        available_actions=actions
                     )
                 )
             )
@@ -267,7 +270,7 @@ class MARACompositeAutumnChangeDetectionServicer(env_grpc.MARAEnvironmentService
             return step_response
         elif self.transiting == "Transition":
             self.transiting = "ChangeReset"
-            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Interactive environment ended, you will now transit to the defect detection environment."), reward=0, is_terminal=False, info={})
+            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Interactive environment ended, you will now transit to the change detection environment."), reward=0, is_terminal=False, info={})
         elif self.transiting == "ChangeReset":
             self.steps = 0
             # Send initialize and reset to the new environment
@@ -277,8 +280,8 @@ class MARACompositeAutumnChangeDetectionServicer(env_grpc.MARAEnvironmentService
             )
             self.change_detection_environment.Initialize(init_req, context)
             reset_req = env_service_pb2.ResetRequest()
-            self.change_detection_environment.Reset(reset_req, context)
-            observation = self.change_detection_environment.environment.get_observation()
+            reset_response = self.change_detection_environment.Reset(reset_req, context)
+            observation = reset_response.initial_observation
             self.transiting = "Change"
             return env_service_pb2.StepResponse(observation=observation, reward=0, is_terminal=False, info={})
         elif self.transiting == "Change":
@@ -287,9 +290,10 @@ class MARACompositeAutumnChangeDetectionServicer(env_grpc.MARAEnvironmentService
             if is_terminal:
                 self.transiting = "End"
                 step_response.is_terminal = True
+                step_response.info["terminal_condition"] = "finish"
             return step_response
         elif self.transiting == "End":
-            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Change detection environment ended."), reward=0, is_terminal=True, info={})
+            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Change detection environment ended."), reward=0, is_terminal=True, info={"terminal_condition": "finish"})
         else:
             raise ValueError(f"Invalid transiting state: {self.transiting}")
 
@@ -320,10 +324,13 @@ class MARACompositeAutumnPlanningServicer(env_grpc.MARAEnvironmentServicer):
         if self.transiting == "Interactive":
             return self.current_environment.QuerySpaces(request, context)
         elif self.transiting == "Transition" or self.transiting == "PlanningReset":
+            actions = self.interactive_environment.environment.get_action_space()
+            # remove the go-to-test action
+            actions = [action for action in actions if action.text_data != "go-to-test"]
             response = env_service_pb2.SpaceQueryResponse(
                 reactive_response=env_pb2.ReactiveEnvironment.ActionSpaceResponse(
                     action_space=env_pb2.ReactiveEnvironment.ActionSpace(
-                        available_actions=[env_pb2.Action(text_data="noop")]
+                        available_actions=actions
                     )
                 )
             )
@@ -355,7 +362,7 @@ class MARACompositeAutumnPlanningServicer(env_grpc.MARAEnvironmentServicer):
             return step_response
         elif self.transiting == "Transition":
             self.transiting = "PlanningReset"
-            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Interactive environment ended, you will now transit to the action prediction environment."), reward=0, is_terminal=False, info={})
+            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Interactive environment ended, you will now transit to the planning environment."), reward=0, is_terminal=False, info={})
         elif self.transiting == "PlanningReset":
             self.steps = 0
             # Send initialize and reset to the new environment
@@ -365,8 +372,8 @@ class MARACompositeAutumnPlanningServicer(env_grpc.MARAEnvironmentServicer):
             )
             self.planning_environment.Initialize(init_req, context)
             reset_req = env_service_pb2.ResetRequest()
-            self.planning_environment.Reset(reset_req, context)
-            observation = self.planning_environment.environment.get_observation()
+            reset_response = self.planning_environment.Reset(reset_req, context)
+            observation = reset_response.initial_observation
             self.transiting = "Planning"
             return env_service_pb2.StepResponse(observation=observation, reward=0, is_terminal=False, info={})
         elif self.transiting == "Planning":
@@ -383,7 +390,7 @@ class MARACompositeAutumnPlanningServicer(env_grpc.MARAEnvironmentServicer):
             #     self.steps = 0
             return step_response
         elif self.transiting == "End":
-            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Action prediction environment ended."), reward=0, is_terminal=True, info={})
+            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Planning environment ended."), reward=0, is_terminal=True, info={})
         else:
             raise ValueError(f"Invalid transiting state: {self.transiting}")
 

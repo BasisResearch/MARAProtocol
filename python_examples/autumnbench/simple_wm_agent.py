@@ -92,15 +92,18 @@ class SimpleWMAgent:
                               available_actions: list[env_pb2.Action],
                               exclude_giveup: bool = False,
                               exclude_found_fault: bool = False,
-                              exclude_submit: bool = False) -> env_pb2.Action:
+                              exclude_submit: bool = False,
+                              exclude_reset: bool = False) -> env_pb2.Action:
         """Takes a random action. Used for the interactive phase of all tasks."""
         new_available_actions = []
         for action in available_actions:
-            if exclude_giveup and action.text_data == "quit":
+            if exclude_giveup and (action.text_data == "quit" or action.text_data == "go-to-test"):
                 continue
-            if exclude_found_fault and action.text_data == "I found the fault!":
+            if exclude_found_fault and action.text_data == "I found the change!":
                 continue
             if exclude_submit and action.text_data == "submit":
+                continue
+            if exclude_reset and action.text_data == "reset":
                 continue
             new_available_actions.append(action)
         available_actions = new_available_actions
@@ -126,8 +129,7 @@ class SimpleWMAgent:
                         exclude_quit: bool = False,
                         exclude_submit: bool = False
                         ) -> List[env_pb2.Action]:
-        """Expend the actions that contain click with range to all possible
-        actions."""
+        """Expend the actions that contain click with range to all possible actions."""
         expanded_actions = []
         for action in available_actions:
             if exclude_quit and action.text_data == "quit":
@@ -182,7 +184,7 @@ class SimpleWMAgent:
             self, obs: Observation,
             available_actions: list[env_pb2.Action]) -> env_pb2.Action:
         """Acts in the CD evaluation phase.
-        A simpler solver for defect detection. It compars the received 
+        A simpler solver for change detection. It compars the received 
         observation with the observation predicted from its world model, and 
         declare defect is here if they differ.
         TODO: Take the potential stochasticity into account and compute the
@@ -191,26 +193,21 @@ class SimpleWMAgent:
         If the agent has found a defect, it will report it.
         Otherwise, it will act randomly, excluding the 'give up' action.
         """
-        # If it's the first observation, then skip the check
-        if self.history["actions"]:
-            # If the agent has already taken an action, check for defects
-            # based on the previous observation and action.
-            found_defect = self._check_for_defect(obs, self.history["actions"])
-        else:
-            found_defect = False
+        found_defect = self._check_for_change(obs, self.history["actions"])
 
         # If the agent thinks it has found a defect and the `found fault` action
         # is available, which is only available after a few interactions, return
         # the action to report it.
         if found_defect:
-            if any(action.text_data == "I found the fault!"
+            if any(action.text_data == "I found the change!"
                    for action in available_actions):
-                return env_pb2.Action(text_data="I found the fault!")
+                return env_pb2.Action(text_data="I found the change!")
 
         # Otherwise, act randomly, excluding the 'give up' action.
         action = self._sample_random_action(available_actions,
                                             exclude_giveup=True,
-                                            exclude_found_fault=True)
+                                            exclude_found_fault=True, 
+                                            exclude_reset=True)
         self.history["actions"].append(action.text_data)
         return action
 
@@ -228,7 +225,7 @@ class SimpleWMAgent:
     def act(self, observation: env_pb2.Observation,
             available_actions: list[env_pb2.Action]) -> env_pb2.Action:
         """Determines the agent's action based on its current phase."""
-        logging.info(f"available_action: {available_actions}")
+        # logging.info(f"available_action: {available_actions}")
         # self.history['observations'].append(observation)
 
         # Check for phase transition trigger
@@ -247,21 +244,23 @@ class SimpleWMAgent:
 
         # Dispatch action based on the current phase
         if self.phase == 'interaction':
-            action = self._sample_random_action(available_actions)
+            # action = self._sample_random_action(available_actions)
+            # action = env_pb2.Action(text_data="go-to-test") # go to test phase directly
+            action = env_pb2.Action(text_data="quit")
 
         elif self.phase == 'evaluation':
             if self.task_name == 'mfp':
                 obs_dict = parse_text_obs_to_dict(observation.text_data)
                 action = self._act_mfp_eval(obs_dict, available_actions)
             elif self.task_name == 'cd':
-                # If the option `The fault is here!` is available, it means
+                # If the option `Submit choice` is available, it means
                 # the agent has found the previous observation to be a defect.
-                # So it would choose `The fault is here!` action.
+                # So it would choose `Submit choice` action.
                 fault_is_here_available = any(
-                            action.text_data == "The fault is here!"
+                            action.text_data == "Submit choice"
                         for action in available_actions)
                 if fault_is_here_available:
-                    return env_pb2.Action(text_data="The fault is here!")
+                    return env_pb2.Action(text_data="Submit choice")
 
                 obs_str = observation.text_data.strip('"\'').replace(
                     '\\n', '\n')
@@ -295,7 +294,7 @@ class SimpleWMAgent:
         raise NotImplementedError
 
     @abstractmethod
-    def _check_for_defect(self, next_obs: Observation, 
+    def _check_for_change(self, next_obs: Observation, 
                           action_history: List[Action],
                           num_samples: int = 10) -> bool:
         """**Placeholder**: Checks if the current observation indicates a defect."""
@@ -472,7 +471,7 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
             actions, interpreter_seed=self.interpreter_seed,
             reference_observations=observations)[-1]
 
-    def _check_for_defect(self, next_obs: Observation, 
+    def _check_for_change(self, next_obs: Observation, 
                           action_history: List[Action],
                           num_samples: int = 1) -> bool:
         """Checks if the current observation indicates a defect.
@@ -669,6 +668,8 @@ def _str_grid_to_ndarray(grid_txt: str) -> np.ndarray:
     Helper: turn the whitespace-separated, newline-delimited grid text
     into a 2-D NumPy array of dtype=str.
     """
+    if "frame: " in grid_txt:
+        grid_txt = grid_txt.split("frame: \"")[1]
     rows: List[List[str]] = [
         row.split() for row in grid_txt.strip().splitlines()
     ]
@@ -699,7 +700,6 @@ def parse_text_obs_to_dict(obs_text: str) -> Dict[str, Any]:
     # ... some text ...
     # {"video_location": ..., "render": "...", "action_took": "...", is_finished: ...}
     obs_text = f"{{{obs_text.split('{')[1].split('}')[0]}}}"
-    # breakpoint()
     try:
         obs: Dict[str, Union[str, int, bool, List[str]]] = json.loads(obs_text)
     except:
