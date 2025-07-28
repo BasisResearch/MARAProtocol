@@ -169,14 +169,8 @@ class InteractiveEnvironment:
             raise ValueError(f"Invalid render mode: {self.render_mode}")
 
     def get_instruction_text(self):
-        # task_descriptions = {
-        #     "planning": "In the test phase, you will solve a planning task in the environment you interacted with using your understanding of the dynamics of the environment. You will be given a goal state as well as a highlight mask. Your aim is to interact in the environment such that the highlighted region (i.e. where values are 1) of the grid matches the goal state. If you want to quit, click 'quit'. If you want to submit, click 'submit'. You will be penalized if you click 'submit' before the goal state is reached. You will be told if you have reached the goal state or not. Think carefully about the goal to be reached and your understanding of the environment before taking any actions as you might get stuck.",
-        #     "cd": "In the test phase, you will interact with a defective version of the environment - where one of the dynamics rules has been changed. Your goal is to use you understanding of the environemnt from the interaction phase to detect the change. The environment will start in a normal state and then at some point, the environment will transition to a defective state. As soon as you detect the change, you have to select 'Fault!' action to terminate the environment. You will be penalized if you click 'Fault!' before the change is detected.",
-        #     "mfp": "In the test phase, you will step through frames from a trajectory in this same environment you interacted with. Each frame is structured as a json object with the following fields: \"render\": the grid observed, \"video_location\": timestep at which the frame was observed, \"action_took\": action taken at this timestep, \"is_finished\": whether the episode is finished. IMPORTANT: You must step through ALL frames in the trajectory before making any choice. Use the `step` action to advance through each frame one at a time. You can use your scratchpad to record your thoughts and observations as you go through the frames. Pay attention to patterns, movements, and how the environment evolves over time. Towards the end of the trajectory, parts of the grid will be masked (where the masked locations are marked as `mask`) and you will be given a set of options to fill in the masked region at the final timestep. Only after stepping through all frames should you choose the option that fits the masked region at the final timestep.",
-        # }
-        
-        # task_description = task_descriptions.get(self.task_name, self.task_name)
-        
+        # TODO: add task description
+
         return f"""Welcome, you are now in the interactive phase, where you can interact with the grid using the available actions.
 During the interactive phase your goal is to act in the environment to understand the underlying rules of the environment. 
 Understand the environment and the dynamics of the environment well. Once you have understood the environment, you can select 'go-to-test' to go to the test phase.
@@ -554,8 +548,7 @@ class PlanningEnvironment:
         _, grid_size = parse_grid(self.interpreter.render_all())
         action_space = get_action_space_interactive(grid_size)
         action_space.append(env_pb2.Action(text_data="quit"))
-        action_space.append(env_pb2.Action(text_data="submit"))
-        # action_space.append(env_pb2.Action(text_data="reset"))
+        action_space = [action for action in action_space if action.text_data != "reset" and action.text_data != "go-to-test"]
         return action_space
 
     def step(
@@ -568,23 +561,21 @@ class PlanningEnvironment:
             self.is_terminal = True
             observation = self.get_quit_observation()
             return observation, 0, self.is_terminal, {}
-        # if action.text_data == "reset":
-        #     self.reset()
-        #     observation = self.get_observation()
-        #     return observation, 0, self.is_terminal, {}
-        if action.text_data == "submit":
-            self.is_terminal = True
-            observation = self.planning_observation()
-            reward = 1 if observation.text_data == "You have successfully predicted the action." else -1
-            return observation, reward, self.is_terminal, {}
+        # action invalid message if reset is called
+        if action.text_data == "reset":
+            return env_pb2.Observation(text_data="Reset is not allowed in the test phase."), 0, self.is_terminal, {}
         else:
             if not interpreter_action_to_text(self.interpreter,
                                               action.text_data):
                 logger.warning(
                     f"Invalid action: {action.text_data} for id: {self.id}")
-                return self.get_observation(), 0, self.is_terminal, {}
+                return env_pb2.Observation(text_data="Invalid action. Please select a valid action."), 0, self.is_terminal, {}
             self.interpreter.step()
             observation = self.get_observation()
+            reached_goal = self.reached_goal()
+            if reached_goal:
+                self.is_terminal = True
+                return observation, 1, self.is_terminal, {"terminal_condition": "finish"}
             logger.debug(f"Observation: {observation} for id: {self.id}")
             return observation, 0, self.is_terminal, {}
 
@@ -592,36 +583,31 @@ class PlanningEnvironment:
         return env_pb2.Observation(
             text_data="You quit the environment. No reward will be given.")
 
-    def planning_observation(self) -> env_pb2.Observation:
+    def reached_goal(self) -> bool:
         render_dict = json.loads(self.interpreter.render_all())
         grid_matrix = render_grid_to_matrix(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
-        if check_grid_same(grid_matrix, self.goal_state, self.inv_mask):
-            return env_pb2.Observation(
-                text_data="You have successfully predicted the action.")
-        else:
-            return env_pb2.Observation(
-                text_data="You have failed to predict the action.")
+        check_grid_same(grid_matrix, self.goal_state, self.inv_mask)
 
     def get_observation(self) -> env_pb2.Observation:
+        text_data = ""
         if not self.inited:
             self.inited = True
-            return env_pb2.Observation(
-                text_data=
-                "The interaction phase is now over. Now you will try to solve a planning task in the environment you interacted with using your understanding of the dynamics of the environment."
-                +
-                "You will be given a goal state as well as a mask. Your aim is to interact in the environment such that the masked region (i.e. where mask is 1) of the grid matches the goal state."
-                + "If you want to quit, click 'quit'." +
-                "If you want to submit, click 'submit'." +
-                "You will be penalized if you click 'submit' before the goal state is reached. Think carefully about the goal to be reached and your understanding of the environment before taking any actions as you might get stuck."
-            )
+            text_data = f"""The interaction phase is over, you have entered the test phase. You will now be given a goal state and a highlight mask of the same size as the grid where 1 indicates the region to be reached and 0 indicates the region to be ignored. 
+            Your aim is to solve a planning task in the environment you interacted by reaching the goal state in the highlighted region.
+            Note that you can no longer reset the environment, so plan carefully. You will be given the same environment as you interacted with in the interaction phase, you need to interact with it to reach the goal state in the highlighted region.
+            Your grid will be checked against the goal state and the highlight mask at every timestep. If you reach the goal state in the highlighted region, you will be given a reward. You may choose to quit at any time if you are stuck.
+            The initial grid is:
+            """
+        else:
+            text_data = "The current grid is: "
         if self.render_mode == "text":
             render_dict = json.loads(self.interpreter.render_all())
             render_grid_matrix = render_grid(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
             return env_pb2.Observation(
-                text_data=json.dumps({
+                text_data=text_data + json.dumps({
                     "render": render_grid_matrix,
                     "goal": self.goal_state,
-                    "mask": self.inv_mask
+                    "highlight_mask": self.inv_mask
                 }))
         elif self.render_mode == "image":
             render_dict = json.loads(self.interpreter.render_all())
@@ -646,7 +632,7 @@ class PlanningEnvironment:
             image_json_str = json.dumps(image_data)
 
             return env_pb2.Observation(
-                text_data=json.dumps({"mask": self.inv_mask}),
+                text_data=text_data + json.dumps({"highlight_mask": self.inv_mask}),
                 image_data=image_json_str.encode('utf-8'))
         else:
             raise ValueError(f"Invalid render mode: {self.render_mode}")

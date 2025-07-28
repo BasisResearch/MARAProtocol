@@ -197,7 +197,7 @@ class MARAPlanningServicer(MARAInteractiveServicer):
                                                       data_dir=request.config["data_dir"])
         response = env_service_pb2.InitializeResponse(
             success=True,
-            message=f"Action Prediction Environment initialized: {request.config['env_name']}"
+            message=f"Planning Environment initialized: {request.config['env_name']}"
         )
         
         return response
@@ -226,6 +226,7 @@ class MARACompositeAutumnChangeDetectionServicer(env_grpc.MARAEnvironmentService
         self.data_dir = request.config["data_dir"]
         self.render_mode = request.config["render_mode"]
         self.logging_path = request.config["logging_path"]
+        self.current_environment = self.interactive_environment
         return self.current_environment.Initialize(request, context)
 
     def QuerySpaces(self, request, context):
@@ -267,23 +268,22 @@ class MARACompositeAutumnChangeDetectionServicer(env_grpc.MARAEnvironmentService
                 self.transiting = "Transition"
                 step_response.is_terminal = False
                 self.steps = 0
+            
+            if self.transiting == "Transition":
+                self.steps = 0
+                # Send initialize and reset to the new environment
+                self.current_environment = self.change_detection_environment
+                init_req = env_service_pb2.InitializeRequest(
+                    config={"env_name": self.env_name, "seed": self.seed, "data_dir": self.data_dir, "render_mode": self.render_mode, "logging_path": self.logging_path, "stack_frames": "1", "skip_frames": "false"}
+                )
+                self.change_detection_environment.Initialize(init_req, context)
+                reset_req = env_service_pb2.ResetRequest()
+                reset_response = self.change_detection_environment.Reset(reset_req, context)
+                observation = reset_response.initial_observation
+                self.transiting = "Change"
+                return env_service_pb2.StepResponse(observation=observation, reward=0, is_terminal=False, info={})
+
             return step_response
-        elif self.transiting == "Transition":
-            self.transiting = "ChangeReset"
-            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Interactive environment ended, you will now transit to the change detection environment."), reward=0, is_terminal=False, info={})
-        elif self.transiting == "ChangeReset":
-            self.steps = 0
-            # Send initialize and reset to the new environment
-            self.current_environment = self.change_detection_environment
-            init_req = env_service_pb2.InitializeRequest(
-                config={"env_name": self.env_name, "seed": self.seed, "data_dir": self.data_dir, "render_mode": self.render_mode, "logging_path": self.logging_path, "stack_frames": "1", "skip_frames": "false"}
-            )
-            self.change_detection_environment.Initialize(init_req, context)
-            reset_req = env_service_pb2.ResetRequest()
-            reset_response = self.change_detection_environment.Reset(reset_req, context)
-            observation = reset_response.initial_observation
-            self.transiting = "Change"
-            return env_service_pb2.StepResponse(observation=observation, reward=0, is_terminal=False, info={})
         elif self.transiting == "Change":
             step_response = self.change_detection_environment.Step(request, context)
             observation, reward, is_terminal, info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
@@ -318,6 +318,7 @@ class MARACompositeAutumnPlanningServicer(env_grpc.MARAEnvironmentServicer):
         self.data_dir = request.config["data_dir"]
         self.render_mode = request.config["render_mode"]
         self.logging_path = request.config["logging_path"]
+        self.current_environment = self.interactive_environment
         return self.current_environment.Initialize(request, context)
 
     def QuerySpaces(self, request, context):
@@ -359,23 +360,22 @@ class MARACompositeAutumnPlanningServicer(env_grpc.MARAEnvironmentServicer):
                 self.transiting = "Transition"
                 step_response.is_terminal = False
                 self.steps = 0
+            
+            if self.transiting == "Transition":
+                self.transiting = "PlanningReset"
+                self.steps = 0
+                # Send initialize and reset to the new environment
+                self.current_environment = self.planning_environment
+                init_req = env_service_pb2.InitializeRequest(
+                    config={"env_name": self.env_name, "seed": self.seed, "data_dir": self.data_dir, "render_mode": self.render_mode, "logging_path": self.logging_path, "stack_frames": "1", "skip_frames": "false"}
+                )
+                self.planning_environment.Initialize(init_req, context)
+                reset_req = env_service_pb2.ResetRequest()
+                reset_response = self.planning_environment.Reset(reset_req, context)
+                observation = reset_response.initial_observation
+                self.transiting = "Planning"
+                return env_service_pb2.StepResponse(observation=observation, reward=0, is_terminal=False, info={})
             return step_response
-        elif self.transiting == "Transition":
-            self.transiting = "PlanningReset"
-            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Interactive environment ended, you will now transit to the planning environment."), reward=0, is_terminal=False, info={})
-        elif self.transiting == "PlanningReset":
-            self.steps = 0
-            # Send initialize and reset to the new environment
-            self.current_environment = self.planning_environment
-            init_req = env_service_pb2.InitializeRequest(
-                config={"env_name": self.env_name, "seed": self.seed, "data_dir": self.data_dir, "render_mode": self.render_mode, "logging_path": self.logging_path, "stack_frames": "1", "skip_frames": "false"}
-            )
-            self.planning_environment.Initialize(init_req, context)
-            reset_req = env_service_pb2.ResetRequest()
-            reset_response = self.planning_environment.Reset(reset_req, context)
-            observation = reset_response.initial_observation
-            self.transiting = "Planning"
-            return env_service_pb2.StepResponse(observation=observation, reward=0, is_terminal=False, info={})
         elif self.transiting == "Planning":
             step_response = self.planning_environment.Step(request, context)
             observation, reward, is_terminal, info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info

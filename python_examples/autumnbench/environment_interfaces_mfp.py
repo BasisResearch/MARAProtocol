@@ -77,6 +77,7 @@ class MARACompositeAutumnMFPServicer(MARAInteractiveServicer):
         self.render_mode = request.config["render_mode"]
         self.data_dir = request.config["data_dir"]
         self.logging_path = request.config["logging_path"]
+        self.current_environment = self.interactive_environment
         return self.current_environment.Initialize(request, context)
 
     def Reset(self, request, context):
@@ -91,35 +92,30 @@ class MARACompositeAutumnMFPServicer(MARAInteractiveServicer):
         if self.transiting_state == "Interactive":
             step_response = self.current_environment.Step(request, context)
             observation, reward, is_terminal, info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
-            if is_terminal and self.current_environment == self.interactive_environment:
+            if (is_terminal and self.current_environment == self.interactive_environment) or \
+               (self.steps >= self.max_interaction_steps):
                 self.current_environment = self.mfp_environment
                 self.transiting_state = "Transition"
                 step_response.is_terminal = False
                 self.steps = 0
-            elif self.steps >= self.max_interaction_steps:
-                self.current_environment = self.mfp_environment
-                self.transiting_state = "Transition"
-                step_response.is_terminal = False
-                self.steps = 0
+
+                init_req = env_service_pb2.InitializeRequest(
+                    config={
+                        "env_name": self.env_name,
+                        "render_mode": self.render_mode,
+                        "data_dir": self.data_dir,
+                        "logging_path": self.logging_path
+                    })
+                self.mfp_environment.Initialize(init_req, context)
+                reset_req = env_service_pb2.ResetRequest()
+                self.mfp_environment.Reset(reset_req, context)
+                observation = self.mfp_environment.environment.get_observation()
+                self.transiting_state = "MFP"
+                return env_service_pb2.StepResponse(observation=observation,
+                                                    reward=0,
+                                                    is_terminal=False,
+                                                    info={})
             return step_response
-        elif self.transiting_state == "Transition":
-            self.current_environment = self.mfp_environment
-            init_req = env_service_pb2.InitializeRequest(
-                config={
-                    "env_name": self.env_name,
-                    "render_mode": self.render_mode,
-                    "data_dir": self.data_dir,
-                    "logging_path": self.logging_path
-                })
-            self.mfp_environment.Initialize(init_req, context)
-            reset_req = env_service_pb2.ResetRequest()
-            self.mfp_environment.Reset(reset_req, context)
-            observation = self.mfp_environment.environment.get_observation()
-            self.transiting_state = "MFP"
-            return env_service_pb2.StepResponse(observation=observation,
-                                                reward=0,
-                                                is_terminal=False,
-                                                info={})
         elif self.transiting_state == "MFP":
             step_response = self.mfp_environment.Step(request, context)
             observation, reward, is_terminal, info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
