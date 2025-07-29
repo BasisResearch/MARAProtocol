@@ -572,8 +572,7 @@ class PlanningEnvironment:
                 return env_pb2.Observation(text_data="Invalid action. Please select a valid action."), 0, self.is_terminal, {}
             self.interpreter.step()
             observation = self.get_observation()
-            reached_goal = self.reached_goal()
-            if reached_goal:
+            if self.reached_goal():
                 self.is_terminal = True
                 return observation, 1, self.is_terminal, {"terminal_condition": "finish"}
             logger.debug(f"Observation: {observation} for id: {self.id}")
@@ -586,7 +585,7 @@ class PlanningEnvironment:
     def reached_goal(self) -> bool:
         render_dict = json.loads(self.interpreter.render_all())
         grid_matrix = render_grid_to_matrix(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
-        check_grid_same(grid_matrix, self.goal_state, self.inv_mask)
+        return check_grid_same(grid_matrix, self.goal_state, self.inv_mask)
 
     def get_observation(self) -> env_pb2.Observation:
         text_data = ""

@@ -38,7 +38,6 @@
       ))
 
       (on clicked (= cnt (+ (prev cnt) 1)))
-      (on (& (down) (>= cnt 2)) (= cnt (+ (prev cnt) 1)))
 
       (= nextWater (--> (drop)
                       (if (.. drop liquid)

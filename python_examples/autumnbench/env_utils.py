@@ -120,7 +120,7 @@ def parse_grid(render_output: str):
 
 def render_grid(grid: Dict[str, Any], background_color: str = "black", color_dict: Dict[str, int] = DEFAULT_COLOR_DICT) -> str:
     """
-    Renders the grid into a string representation.
+    Renders the grid into a list of lists of strings.
 
     Args:
         grid (Dict[str, Any]): The grid dictionary.
@@ -141,7 +141,7 @@ def render_grid(grid: Dict[str, Any], background_color: str = "black", color_dic
             if (row_idx >= 0 and row_idx
                     < grid_size) and (col_idx >= 0 and col_idx < grid_size):
                 grid_matrix[row_idx][col_idx] = color
-    return '\n'.join([' '.join(row) for row in grid_matrix])
+    return grid_matrix
 
 
 def render_grid_to_matrix(grid: Dict[str, Any], background_color: str = "black", color_dict: Dict[str, int] = DEFAULT_COLOR_DICT) -> List[List[str]]:
@@ -164,6 +164,7 @@ def render_grid_to_matrix(grid: Dict[str, Any], background_color: str = "black",
 
 def check_grid_same(grid1: List[List[str]], grid2: List[List[str]],
                     inv_mask: List[List[bool]]) -> bool:
+    # return np.array_equal(np.array(grid1)[inv_mask], np.array(grid2)[inv_mask])
     for i in range(len(grid1)):
         for j in range(len(grid1[0])):
             if not inv_mask[i][j]:

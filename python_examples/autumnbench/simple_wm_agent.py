@@ -127,7 +127,8 @@ class SimpleWMAgent:
     
     def _expand_actions(self, available_actions: List[env_pb2.Action],
                         exclude_quit: bool = False,
-                        exclude_submit: bool = False
+                        exclude_submit: bool = False,
+                        exclude_reset: bool = True
                         ) -> List[env_pb2.Action]:
         """Expend the actions that contain click with range to all possible actions."""
         expanded_actions = []
@@ -135,6 +136,8 @@ class SimpleWMAgent:
             if exclude_quit and action.text_data == "quit":
                 continue
             if exclude_submit and action.text_data == "submit":
+                continue
+            if exclude_reset and action.text_data == "reset":
                 continue
             action_str = action.text_data
             if 'click' in action_str and len(action_str.split(' ')) == 3:
@@ -246,7 +249,9 @@ class SimpleWMAgent:
         if self.phase == 'interaction':
             # action = self._sample_random_action(available_actions)
             # action = env_pb2.Action(text_data="go-to-test") # go to test phase directly
-            action = env_pb2.Action(text_data="quit")
+            self.phase = 'evaluation'
+            logger.info(f"Phase transition triggered in agent. New phase: '{self.phase}'.")
+            return env_pb2.Action(text_data="go-to-test")
 
         elif self.phase == 'evaluation':
             if self.task_name == 'mfp':
@@ -262,18 +267,18 @@ class SimpleWMAgent:
                 if fault_is_here_available:
                     return env_pb2.Action(text_data="Submit choice")
 
-                obs_str = observation.text_data.strip('"\'').replace(
-                    '\\n', '\n')
+                obs_str = observation.text_data.strip('"\'').replace('\\n', '\n')
                 obs_arr = _str_grid_to_ndarray(obs_str)
                 action = self._act_cd_eval(obs_arr, available_actions)
             elif self.task_name == 'planning':
-                data_dict = json.loads(observation.text_data)
-                goal, mask, render = data_dict["goal"],\
-                                data_dict["mask"], data_dict["render"]
-                goal, mask, render = np.array(goal), np.array(mask), \
-                                        _str_grid_to_ndarray(render)
-                action = self._act_planning_eval(goal, mask, render, 
-                                                 available_actions)
+                obs_str = observation.text_data
+                json_start_index = obs_str.find('{')
+                if json_start_index != -1:
+                    json_str = obs_str[json_start_index:]
+                    data_dict = json.loads(json_str)
+                    goal, mask, render = data_dict["goal"], data_dict["highlight_mask"], data_dict["render"]
+                    goal, mask, render = np.array(goal), np.array(mask), np.array(render)
+                    action = self._act_planning_eval(goal, mask, render, available_actions)
             else:
                 logger.warning(
                     f"Unknown task '{self.task_name}' for evaluation phase. Acting randomly."
@@ -525,7 +530,8 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
         # ---------- build the discrete action set we are willing to search -----
         all_actions = self._expand_actions(available_actions,
                                         exclude_quit=True,
-                                        exclude_submit=True)
+                                        exclude_submit=True,
+                                        exclude_reset=True)
 
         # ---------- find a new plan (open‑loop) --------------------------------
         all_action_strs = [a.text_data for a in all_actions]
