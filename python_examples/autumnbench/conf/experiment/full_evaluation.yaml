@@ -4,6 +4,6 @@
 # Full evaluation parameters
 max_interaction_steps: 200
 max_history_length: -1  # No limit
-stack_frames: 5
+stack_frames: True
 output_csv: "full_evaluation_results.csv"
 logging_path: "./logs/full_evaluation"

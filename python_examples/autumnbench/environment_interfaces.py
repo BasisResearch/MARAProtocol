@@ -30,7 +30,7 @@ class MARAInteractiveServicer(env_grpc.MARAEnvironmentServicer):
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
         self.environment = InteractiveEnvironment(
             request.config["env_name"], 
-            stack_frames=int(request.config["stack_frames"]), 
+            stack_frames=request.config["stack_frames"].lower() == "true", 
             skip_frames=request.config["skip_frames"].lower() == "true",
             render_mode=request.config["render_mode"],
             logging_path=request.config["logging_path"],
@@ -162,7 +162,7 @@ class MARAChangeDetectionSliderServicer(MARAChangeDetectionServicer):
         self.environment = CDSliderEnvironment(request.config["env_name"],
                                                render_mode=request.config["render_mode"],
                                                logging_path=request.config["logging_path"],
-                                               stack_frames=int(request.config["stack_frames"]),
+                                               stack_frames=request.config["stack_frames"].lower() == "true",
                                                skip_frames=request.config["skip_frames"].lower() == "true",
                                                seed=int(request.config["seed"]),
                                                data_dir=request.config["data_dir"])
@@ -191,7 +191,7 @@ class MARAPlanningServicer(MARAInteractiveServicer):
         self.environment = PlanningEnvironment(request.config["env_name"],
                                                       render_mode=request.config["render_mode"],
                                                       logging_path=request.config["logging_path"],
-                                                      stack_frames=int(request.config["stack_frames"]),
+                                                      stack_frames=request.config["stack_frames"].lower() == "true",
                                                       skip_frames=request.config["skip_frames"].lower() == "true",
                                                       seed=int(request.config["seed"]),
                                                       data_dir=request.config["data_dir"])
@@ -274,7 +274,7 @@ class MARACompositeAutumnChangeDetectionServicer(env_grpc.MARAEnvironmentService
                 # Send initialize and reset to the new environment
                 self.current_environment = self.change_detection_environment
                 init_req = env_service_pb2.InitializeRequest(
-                    config={"env_name": self.env_name, "seed": self.seed, "data_dir": self.data_dir, "render_mode": self.render_mode, "logging_path": self.logging_path, "stack_frames": "1", "skip_frames": "false"}
+                    config={"env_name": self.env_name, "seed": self.seed, "data_dir": self.data_dir, "render_mode": self.render_mode, "logging_path": self.logging_path, "stack_frames": "false", "skip_frames": "false"}
                 )
                 self.change_detection_environment.Initialize(init_req, context)
                 reset_req = env_service_pb2.ResetRequest()
@@ -367,7 +367,7 @@ class MARACompositeAutumnPlanningServicer(env_grpc.MARAEnvironmentServicer):
                 # Send initialize and reset to the new environment
                 self.current_environment = self.planning_environment
                 init_req = env_service_pb2.InitializeRequest(
-                    config={"env_name": self.env_name, "seed": self.seed, "data_dir": self.data_dir, "render_mode": self.render_mode, "logging_path": self.logging_path, "stack_frames": "1", "skip_frames": "false"}
+                    config={"env_name": self.env_name, "seed": self.seed, "data_dir": self.data_dir, "render_mode": self.render_mode, "logging_path": self.logging_path, "stack_frames": "false", "skip_frames": "false"}
                 )
                 self.planning_environment.Initialize(init_req, context)
                 reset_req = env_service_pb2.ResetRequest()

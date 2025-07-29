@@ -278,8 +278,7 @@ class EvaluationControllerNoServer:
                             "_".join(env_id.split("_")[:-2]),
                             "max_interaction_steps":
                             str(self.config.get("max_interaction_steps", 25)),
-                            "stack_frames":
-                            str(self.config.get("stack_frames", 0)),
+                            "stack_frames": str(self.config.get("stack_frames", False)),
                             "skip_frames":
                             str(self.config.get("skip_frames", False)),
                             "render_mode":
@@ -325,7 +324,7 @@ class EvaluationControllerNoServer:
                         "task_name":
                         self.config.get("task_name", "mfp"),
                         "stack_frames":
-                        str(self.config.get("stack_frames", 0)),
+                        str(self.config.get("stack_frames", False)),
                         "skip_frames":
                         str(self.config.get("skip_frames", False)),
                         "render_mode":

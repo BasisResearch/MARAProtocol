@@ -6,7 +6,7 @@ max_interaction_steps: 10
 max_history_length: 5
 output_csv: "debug_results.csv"
 skip_frames: False
-stack_frames: 0
+stack_frames: False
 render_mode: "text"
 seed: 0
 data_dir: "./data"

@@ -23,11 +23,12 @@ oracle_seed: null
 logging_path: "./logs"
 
 max_history_length: -1 
-stack_frames: 0
-skip_frames: false # skip `stack_frames` frames if true, stack them if false
+stack_frames: true
+skip_frames: false
 max_interaction_steps: 300
 max_steps: 501
 render_mode: "text"
+seed: 0
 
 task_name: "cd" # mfp, cd, planning
 envs: [

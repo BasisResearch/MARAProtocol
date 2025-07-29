@@ -32,7 +32,7 @@ class InteractiveEnvironment:
     def __init__(self,
                  env_name,
                  parsed_in_id=None,
-                 stack_frames=0,
+                 stack_frames=False,
                  skip_frames=False,
                  render_mode="text",
                  logging_path="./logs",
@@ -43,6 +43,7 @@ class InteractiveEnvironment:
         self.id = str(uuid.uuid4()) if parsed_in_id is None else parsed_in_id
         self.inited = False
         self.stack_frames = stack_frames
+        self.num_stack_frames = 1
         self.skip_frames = skip_frames
         self.render_mode = render_mode
         self.logging_path = logging_path
@@ -55,6 +56,7 @@ class InteractiveEnvironment:
         self.interpreter = Interpreter()
         self.interpreter.run_script(self.prog, autumnstdlib, "", self.seed)
         self.inited = False
+        self.num_stack_frames = self.interpreter.get_frame_rate() // 2 if self.stack_frames else 1
         self.time = 0
         if not os.path.exists(f"{self.logging_path}/{self.env_name}"):
             os.makedirs(f"{self.logging_path}/{self.env_name}")
@@ -92,24 +94,23 @@ class InteractiveEnvironment:
                 return self.get_observation(), 0, self.is_terminal, {}
             self.interpreter.step()
             observation = self.get_observation()
-            if self.stack_frames > 0:
+            if self.num_stack_frames > 1:
                 if self.render_mode == "text":
-                    stacked_frames = [observation.text_data]
-                    for _ in range(self.stack_frames):
+                    stacked_frames = [{"frame_time": self.time, "action_took": "noop", "render": observation.text_data}]
+                    for i in range(self.num_stack_frames):
                         self.interpreter.step()
                         observation = self.get_observation()
-                        stacked_frames.append(observation.text_data)
-                    # if self.render_mode == "text":
+                        stacked_frames.append({"frame_time": self.time * self.num_stack_frames + i, "action_took": "noop", "render": observation.text_data})
                     if not self.skip_frames:
-                        observation = "\n\nObservation: ".join(stacked_frames)
+                        observation = "\n\nObservation: ".join([f"Frame time: {frame['frame_time']}\nAction took: noop\nObservation: {frame['render']}" for frame in stacked_frames])
                         observation = env_pb2.Observation(text_data=observation)
                     else:
                         observation = env_pb2.Observation(
-                            text_data=f"Skipped {self.stack_frames} frames. Current frame: {observation.text_data}"
+                            text_data=f"Skipped {self.num_stack_frames} frames. Current frame: {observation.text_data}"
                         )
                 elif self.render_mode == "image":
                     stacked_frames = [observation.image_data]
-                    for _ in range(self.stack_frames):
+                    for _ in range(self.num_stack_frames):
                         self.interpreter.step()
                         observation = self.get_observation()
                         stacked_frames.append(observation.image_data)
@@ -293,7 +294,7 @@ class CDSliderEnvironment:
     def __init__(self,
                  env_name,
                  render_mode="text",
-                 stack_frames=0,
+                 stack_frames=False,
                  skip_frames=False,
                  logging_path="./logs",
                  data_dir=CURR_DIR,
@@ -508,7 +509,7 @@ class PlanningEnvironment:
     def __init__(self,
                  env_name,
                  render_mode="text",
-                 stack_frames=0,
+                 stack_frames=False,
                  skip_frames=False,
                  logging_path="./logs",
                  data_dir=CURR_DIR,
