@@ -689,12 +689,12 @@ class MARAMFPEnvironment:
         # The observation consists of:
         # Current video frame, current video location, current grid (masked)
         # Choices if any
-        convert_text_color = lambda x: '\n'.join([
-            ' '.join(["mask" if cell == 0 else self.colors.get(cell, "black") for cell in row])
-            for row in x
-        ])
+        convert_to_text_color = lambda x: [[
+            "mask" if cell == 0 else self.colors.get(cell, "black") for cell in row
+        ] for row in x]
+
         render = self.prompt["observations"][self.current_time]["masked_grid"]
-        color_grid = convert_text_color(render)
+        color_grid = convert_to_text_color(render)
 
         if self.render_mode == "text":
             if self.is_finished:
@@ -709,7 +709,7 @@ class MARAMFPEnvironment:
                     action_took = self.prompt["observations"][-1]["action"][
                         "type"]
                 choices = self.get_choices()
-                choices = [convert_text_color(option) for option in choices]
+                choices = [convert_to_text_color(option) for option in choices]
                 return env_pb2.Observation(
                     text_data=json.dumps({
                         "video_location": str(self.current_time)+"/"+str(len(self.prompt["observations"])-1),
@@ -754,7 +754,7 @@ You will step through the trajectory one frame at a time. Towards the end of the
         elif self.render_mode == "image":
             if self.is_finished:
                 choices = self.get_choices()
-                choices = [convert_text_color(option) for option in choices]
+                choices = [convert_to_text_color(option) for option in choices]
                 choices = [
                     render_string_grid_matplotlib(
                         option,

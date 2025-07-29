@@ -267,9 +267,22 @@ class SimpleWMAgent:
                 if fault_is_here_available:
                     return env_pb2.Action(text_data="Submit choice")
 
-                obs_str = observation.text_data.strip('"\'').replace('\\n', '\n')
-                obs_arr = _str_grid_to_ndarray(obs_str)
-                action = self._act_cd_eval(obs_arr, available_actions)
+                obs_str = observation.text_data
+                json_start_index = obs_str.find('[')
+
+                if json_start_index != -1:
+                    json_str = obs_str[json_start_index:]
+                    try:
+                        grid_list = json.loads(json_str)
+                        obs_arr = np.array(grid_list)
+                        action = self._act_cd_eval(obs_arr, available_actions)
+                    except json.JSONDecodeError:
+                        logger.warning("Failed to parse JSON from observation for CD task, acting randomly.")
+                        action = self._sample_random_action(available_actions, exclude_reset=True)
+                else:
+                    # No grid found in observation, likely an intro message.
+                    logger.info("No grid found in CD observation, acting randomly.")
+                    action = self._sample_random_action(available_actions, exclude_reset=True)
             elif self.task_name == 'planning':
                 obs_str = observation.text_data
                 json_start_index = obs_str.find('{')
@@ -714,10 +727,10 @@ def parse_text_obs_to_dict(obs_text: str) -> Dict[str, Any]:
     # Convert main render block → ndarray and store under "state"
     render_txt = obs.pop("render", None)
     if render_txt is not None:
-        obs["obs_state"] = _str_grid_to_ndarray(render_txt)
+        obs["obs_state"] = np.array(render_txt)
 
     # If multiple option boards are supplied, convert each as well
     if "choices" in obs and isinstance(obs["choices"], list):
-        obs["choices"] = [_str_grid_to_ndarray(opt) for opt in obs["choices"]]
+        obs["choices"] = [np.array(opt) for opt in obs["choices"]]
 
     return obs
