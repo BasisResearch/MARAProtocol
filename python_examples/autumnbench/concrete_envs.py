@@ -128,29 +128,10 @@ class InteractiveEnvironment:
             return observation, 0, self.is_terminal, {}
 
     def get_observation(self) -> env_pb2.Observation:
+        text_data = ""
         if not self.inited:
             self.inited = True
-            # show the initial state of the grid
-            render_dict = json.loads(self.interpreter.render_all())
-            render_img_str = render_grid_matplotlib(
-                render_dict,
-                output_path=f"{self.logging_path}/{self.env_name}/interactive/interactive_{self.time}.jpeg",
-                background_color=self.interpreter.get_background(),
-                color_dict=self.color_dict_str_to_int
-            )
-            render_img_bytes = base64.b64decode(render_img_str)
-            render_dict = render_grid(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
-            if self.render_mode == "text":
-                return env_pb2.Observation(
-                    text_data=self.get_instruction_text() + "\nHere is the initial state of the grid: \n" + json.dumps(render_dict)
-                )
-            elif self.render_mode == "image":
-                return env_pb2.Observation(
-                    text_data=self.get_instruction_text() + "\nHere is the initial state of the grid: \n",
-                    image_data=render_img_bytes,
-                )
-            else:
-                raise ValueError(f"Invalid render mode: {self.render_mode}")
+            text_data = self.get_instruction_text() + "\nHere is the initial state of the grid: \n"
         render_dict = json.loads(self.interpreter.render_all())
         render_img_str = render_grid_matplotlib(
             render_dict,
@@ -161,10 +142,10 @@ class InteractiveEnvironment:
         render_img_bytes = base64.b64decode(render_img_str)
         render_dict = render_grid(render_dict, background_color=self.interpreter.get_background(), color_dict=self.color_dict_str_to_int)
         if self.render_mode == "text":
-            return env_pb2.Observation(text_data=json.dumps(render_dict))
+            return env_pb2.Observation(text_data=text_data + json.dumps(render_dict))
         elif self.render_mode == "image":
             return env_pb2.Observation(
-                text_data="Here is the current frame: \n", image_data=render_img_bytes
+                text_data=text_data, image_data=render_img_bytes
             )
         else:
             raise ValueError(f"Invalid render mode: {self.render_mode}")
@@ -723,12 +704,12 @@ class MARAMFPEnvironment:
             else:
                 if self.current_time == 0:
                     text_data =\
-                    """The interaction phase is now over. You will now step through frames from a trajectory in this same environment you interacted with. Each frame is structured as a json object with the following fields:
+                    """The interaction phase is now over. You will now step through frames from a trajectory in this same environment you interacted with (use the `step` action to step through the trajectory). Each frame is structured as a json object with the following fields:
 \"render\": the grid observed,
 \"video_location\": timestep at which the frame was observed,
 \"action_took\": action taken at this timestep,
 \"is_finished\": whether the episode is finished.
-You will step through the trajectory one frame at a time. Towards the end of the trajectory, parts of the grid will be masked (where the masked locations are marked as `mask`) and you will be given a set of choices to fill in the masked region at the final timestep. You need to choose option that fits the masked region at the final timestep.\n"""+\
+You will step through the trajectory one frame at a time. Towards the end of the trajectory, parts of the grid will be masked (where the masked locations are marked as `mask`) and you will be given a set of choices to fill in the masked region at the final timestep. You need to choose option that fits the masked region at the final timestep. You can also use the `rewind` action to go back to the previous frame.\n"""+\
                     json.dumps({
                         "video_location": str(self.current_time)+"/"+str(len(self.prompt["observations"])-1),
                         "render": color_grid,

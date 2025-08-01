@@ -33,7 +33,6 @@ Here is a description of the actions:
 - `down` - Press the down arrow key.
 - `noop` - Do nothing and continue to the next step.
 - `quit` - Quit the environment.
-- `step` - Step through a sequence one frame at a time.
 - `submit` - submit the current state of the grid.
 
 Additional actions will be described whenever available.
@@ -56,7 +55,6 @@ Here is a description of the actions:
 - `down` - Press the down arrow key.
 - `noop` - Do nothing and continue to the next step.
 - `quit` - Quit the environment.
-- `step` - Step through a sequence one frame at a time.
 - `submit` - submit the current state of the grid.
 - `go-to-test` - Go to the test phase.
 - `reset` - Reset the environment to the initial state.
