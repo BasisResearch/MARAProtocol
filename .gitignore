@@ -7,3 +7,4 @@ generated/
 log_environment_interfaces*
 AutumnBenchmark
 log
+python_examples/autumnbench/example_benchmark/*
