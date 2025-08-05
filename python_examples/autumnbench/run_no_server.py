@@ -29,15 +29,14 @@ def get_environment_ids(data_dir: str, task_name: str):
             with open(os.path.join(prompts_dir, file), "r") as f:
                 data = json.load(f)
                 task_type = data["type"]
-                match task_type:
-                    case "masked_frame_prediction":
-                        environment_ids.append(f"{data['program']}_mfp")
-                    case "change_detection":
-                        environment_ids.append(f"{data['program']}_cd")
-                    case "planning":
-                        environment_ids.append(f"{data['program']}_planning")
-                    case _:
-                        raise ValueError(f"Unknown task type: {task_type}")
+                if task_type == "masked_frame_prediction":
+                    environment_ids.append(f"{data['program']}_mfp")
+                elif task_type == "change_detection":
+                    environment_ids.append(f"{data['program']}_cd")
+                elif task_type == "planning":
+                    environment_ids.append(f"{data['program']}_planning")
+                else:
+                    raise ValueError(f"Unknown task type: {task_type}")
     logging.info(f"Environment IDs: {environment_ids}") 
     environment_ids = list(set(environment_ids))
     return environment_ids
@@ -95,12 +94,23 @@ def run_multi_environment_evaluation(cfg: DictConfig):
     # Print results
     logging.info("Evaluation complete, printing results")
     print("\n=== Evaluation Results ===")
-    print(f"Status: {run_response["message"]}")
-    print(f"Aggregate Reward: {run_response["aggregate_reward"]}")
+    print(f"Status: {run_response['message']}")
+    print(f"Aggregate Reward: {run_response['aggregate_reward']}")
     print("\nEnvironment Rewards:")
     # Convert gRPC map to a standard dict for easier processing/serialization
-    env_rewards_dict = {env_id: reward for env_id, reward in run_response["environment_rewards"].items()}
-    df = pd.DataFrame(env_rewards_dict.items(), columns=['Environment', 'Reward'])
+    env_rewards_dict = {env_id: data for env_id, data in run_response["environment_rewards"].items()}
+    
+    data = []
+    for env_id, env_data in env_rewards_dict.items():
+        data.append({
+            'Environment': env_id,
+            'Reward': env_data['reward'],
+            'Num of Steps (Interaction)': env_data.get('interaction_steps', 0),
+            'Num of Steps (Test)': env_data.get('test_steps', 0),
+            'Num of Resets in Interaction': env_data.get('interaction_resets', 0)
+        })
+
+    df = pd.DataFrame(data)
     for env_id, reward in env_rewards_dict.items():
         print(f"  {env_id}: {reward}")
     
@@ -108,7 +118,7 @@ def run_multi_environment_evaluation(cfg: DictConfig):
     for i, env_id in enumerate(run_response["environments_visited"]):
         print(f"  {i+1}. {env_id}")
     
-    print(f"\nEvaluation Complete: {run_response["evaluation_complete"]}")
+    print(f"\nEvaluation Complete: {run_response['evaluation_complete']}")
 
     # Write environment rewards dict results to CSV
     if not df.empty:

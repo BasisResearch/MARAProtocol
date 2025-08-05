@@ -677,6 +677,8 @@ class MARAMFPEnvironment:
 
         render = self.prompt["observations"][self.current_time]["masked_grid"]
         color_grid = convert_to_text_color(render)
+        # Convert list of lists to string format for render_string_grid_matplotlib
+        color_grid_str = "\n".join([" ".join(row) for row in color_grid])
 
         if self.render_mode == "text":
             if self.is_finished:
@@ -746,7 +748,7 @@ You will step through the trajectory one frame at a time. Towards the end of the
                     ) for i, option in enumerate(choices)
                 ]
                 grid_image = render_string_grid_matplotlib(
-                    color_grid,
+                    color_grid_str,
                     output_path=
                     f"{self.logging_path}/{self.env_name}/mfp/mfp_render_{self.current_time}.jpeg",
                     color_dict=self.color_dict_str_to_int
@@ -773,17 +775,20 @@ You will step through the trajectory one frame at a time. Towards the end of the
                     }),
                     image_data=image_json_str.encode('utf-8'))
             else:
-                if self.prompt["observations"][
-                        self.current_time]["action"]["type"] == "click":
-                    action_took = self.prompt["observations"][
-                        self.current_time]["action"]["type"] + " " + str(
-                            self.prompt["observations"][
-                                self.current_time]["action"]["x"]) + " " + str(
-                                    self.prompt["observations"][
-                                        self.current_time]["action"]["y"])
+                if "action" in self.prompt["observations"][self.current_time]:
+                    if self.prompt["observations"][
+                            self.current_time]["action"]["type"] == "click":
+                        action_took = self.prompt["observations"][
+                            self.current_time]["action"]["type"] + " " + str(
+                                self.prompt["observations"][
+                                    self.current_time]["action"]["x"]) + " " + str(
+                                        self.prompt["observations"][
+                                            self.current_time]["action"]["y"])
+                    else:
+                        action_took = self.prompt["observations"][
+                            self.current_time]["action"]["type"]
                 else:
-                    action_took = self.prompt["observations"][
-                        self.current_time]["action"]["type"]
+                    action_took = "start"
                 return env_pb2.Observation(
                     text_data=
                     """The interaction phase is now over. You will now step through frames from a trajectory in this same environment you interacted with. Each frame is structured as a json object with the following fields:

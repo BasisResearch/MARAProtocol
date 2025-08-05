@@ -322,8 +322,12 @@ def render_string_grid_matplotlib(grid: str,
     Returns:
         str: Base64 encoded string of the rendered JPEG image.
     """
-    grid = [row.split(" ") for row in grid.split('\n')]
-    if not grid or not grid[0]:
+    # Handle case where grid is already a list of lists
+    if isinstance(grid, list):
+        grid_list = grid
+    else:
+        grid_list = [row.split(" ") for row in grid.split('\n')]
+    if not grid_list or not grid_list[0]:
         # Handle empty grid
         fig, ax = plt.subplots(figsize=(5, 5))
         ax.text(0.5, 0.5, "No grid data", ha="center", va="center")
@@ -336,8 +340,8 @@ def render_string_grid_matplotlib(grid: str,
         image_bytes = img_buffer.getvalue()
         return base64.b64encode(image_bytes).decode('utf-8')
 
-    num_rows = len(grid)
-    num_cols = len(grid[0]) if grid else 0
+    num_rows = len(grid_list)
+    num_cols = len(grid_list[0]) if grid_list else 0
     img_buffer = io.BytesIO()
 
     # Use constant figure size and dynamically size cells to fit
@@ -367,8 +371,8 @@ def render_string_grid_matplotlib(grid: str,
     cell_size = min(cell_width, cell_height)
 
     for r in range(num_rows):
-        for c in range(len(grid[r])):
-            color_name = grid[r][c].lower()
+        for c in range(len(grid_list[r])):
+            color_name = grid_list[r][c].lower()
 
             # Handle mask entries
             if color_name == "mask":
