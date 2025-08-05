@@ -747,7 +747,7 @@ class EvaluationController:
     def run_environment(self,
                         env_id: str,
                         agent_endpoint: str,
-                        max_steps: int = 201) -> Tuple[float, str, str]:
+                        max_steps: int = 501) -> Tuple[float, str, str]:
         """Run a single environment episode"""
         logger.info(f"Attempting to run environment: {env_id}")
         print(f"Environment map: {self.environments}"

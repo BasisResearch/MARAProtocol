@@ -18,10 +18,15 @@ def get_environment_ids(data_dir: str, task_name: str):
     Get list of environment names based on the `prompts` folder, considering all the json files.
     """
     logging.info(os.getcwd())
+    prompts_dir = os.path.join(data_dir, "prompts")
+    if not os.path.isdir(prompts_dir):
+        logging.warning(f"Prompts directory not found at {prompts_dir}. Returning empty list of environments.")
+        return []
+
     environment_ids = []
-    for file in os.listdir(f"{data_dir}/prompts/"):
+    for file in os.listdir(prompts_dir):
         if file.endswith(f"{task_name}.json"):
-            with open(f"{data_dir}/prompts/{file}", "r") as f:
+            with open(os.path.join(prompts_dir, file), "r") as f:
                 data = json.load(f)
                 task_type = data["type"]
                 match task_type:
@@ -47,8 +52,12 @@ def run_multi_environment_evaluation(cfg: DictConfig):
     logging.info(f"Running evaluation for {cfg} config")
     # Connect to evaluation controller
     logging.info("Initializing controller with Autumn environments")
-    environment_ids = get_environment_ids(cfg.data_dir, cfg.task_name) if not cfg.envs else cfg.envs
-    logging.info(f"Running evaluation for {environment_ids}")
+    environment_ids = cfg.envs
+    if not environment_ids:
+        environment_ids = get_environment_ids(cfg.data_dir, cfg.task_name)
+    if not environment_ids:
+        logging.error("No environments specified or found. Aborting evaluation.")
+        return
 
     evaluation_controller = EvaluationControllerNoServer()
     init_success, init_message = evaluation_controller.initialize(
@@ -91,6 +100,7 @@ def run_multi_environment_evaluation(cfg: DictConfig):
     print("\nEnvironment Rewards:")
     # Convert gRPC map to a standard dict for easier processing/serialization
     env_rewards_dict = {env_id: reward for env_id, reward in run_response["environment_rewards"].items()}
+    df = pd.DataFrame(env_rewards_dict.items(), columns=['Environment', 'Reward'])
     for env_id, reward in env_rewards_dict.items():
         print(f"  {env_id}: {reward}")
     
@@ -101,8 +111,10 @@ def run_multi_environment_evaluation(cfg: DictConfig):
     print(f"\nEvaluation Complete: {run_response["evaluation_complete"]}")
 
     # Write environment rewards dict results to CSV
-    df = pd.DataFrame(env_rewards_dict.items(), columns=['Environment', 'Reward'])
-    df.to_csv(output_csv_path, index=False)
+    if not df.empty:
+        df.to_csv(output_csv_path, index=False)
+    else:
+        logging.warning("No results to write to CSV.")
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")

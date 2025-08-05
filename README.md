@@ -57,8 +57,23 @@ We provide several examples:
 1. A standard environment and random agent implementing MARAProtocol as a text adventure in `python_examples/text_adventures`.
 2. [AutumnBench environments](./python_examples/autumnbench/): Masked Frame Prediction (MFP), Change Detection (or Change Detection) and Planning. Along with three types of agents: Random agent, LLM-based agent, and an agent that's built with [AutumnSynth](https://www.basis.ai/blog/autumn/) in mind.
 
+### Downloading the Dataset
+To run the AutumnBench examples, you first need to download the dataset. The dataset contains the tasks, programs, and prompts needed for the benchmark.
+
+To download the public dataset, run the following script from the root of the repository:
+
+```bash
+./scripts/download_dataset.sh
+```
+
+This script requires the following tools to be installed:
+- **Google Cloud SDK**: The script uses `gsutil` to download files from Google Cloud Storage. You can find installation instructions [here](https://cloud.google.com/sdk/docs/install).
+- **jq**: A lightweight and flexible command-line JSON processor. You can install it with `brew install jq` on macOS or find other installation methods [here](https://stedolan.github.io/jq/download/).
+
+After the script finishes, the dataset will be available in the `python_examples/autumnbench/example_benchmark/` directory.
+
 ### AutumnBench Baselines
-We also provide an example benchmark for Autumn that consists of a single program, this is stored in [Example Benchmark](./python_examples/autumnbench/example_benchmark/). We will soon release the script to download the full dataset.
+We also provide an example benchmark for Autumn that consists of a single program, this is stored in [Example Benchmark](./python_examples/autumnbench/example_benchmark/).
 
 Once this is done, you can run the agent with either one of the following agents. Note that, protobuf codes are originally meant for creating gRPC for a language-agnostic interface. However, for simplicity, we usethem locally.
 
