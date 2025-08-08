@@ -91,12 +91,12 @@ class MARACompositeAutumnMFPServicer(MARAInteractiveServicer):
         self.steps += 1
         if self.transiting_state == "Interactive":
             step_response = self.current_environment.Step(request, context)
-            observation, reward, is_terminal, info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
+            observation, reward, is_terminal, response_info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
             if (is_terminal and self.current_environment == self.interactive_environment) or \
                (self.steps >= self.max_interaction_steps):
+                info = {'interaction_steps': self.steps}
                 self.current_environment = self.mfp_environment
                 self.transiting_state = "Transition"
-                step_response.is_terminal = False
                 self.steps = 0
 
                 init_req = env_service_pb2.InitializeRequest(
@@ -111,17 +111,25 @@ class MARACompositeAutumnMFPServicer(MARAInteractiveServicer):
                 self.mfp_environment.Reset(reset_req, context)
                 observation = self.mfp_environment.environment.get_observation()
                 self.transiting_state = "MFP"
-                return env_service_pb2.StepResponse(observation=observation,
-                                                    reward=0,
-                                                    is_terminal=False,
-                                                    info={})
+                
+                step_response.observation.CopyFrom(observation)
+                step_response.reward = 0
+                step_response.is_terminal = False
+                step_response.info.clear()
+                step_response.info.update({str(k): str(v) for k, v in info.items()})
+                return step_response
             return step_response
         elif self.transiting_state == "MFP":
             step_response = self.mfp_environment.Step(request, context)
-            observation, reward, is_terminal, info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
+            observation, reward, is_terminal, response_info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
+            info = dict(response_info)
+            info['test_steps'] = self.steps
             if is_terminal:
                 self.transiting_state = "End"
                 step_response.is_terminal = True
+            
+            step_response.info.clear()
+            step_response.info.update({str(k): str(v) for k, v in info.items()})
             return step_response
         elif self.transiting_state == "End":
             return env_service_pb2.StepResponse(
@@ -347,6 +355,7 @@ class MARAROBOSIMMFPServicer(MARAInteractiveServicer):
                           "Environment not initialized")
 
         action_text = request.action.text_data
+        observation, reward, is_terminal, info = None, 0, False, {}
         try:
             observation, reward, is_terminal, info = self.environment.step(
                 action_text)

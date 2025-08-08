@@ -83,6 +83,7 @@ class MARAInteractiveServicer(env_grpc.MARAEnvironmentServicer):
         if not self.environment:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Environment not initialized")
         
+        observation, reward, is_terminal, info = None, 0, False, {}
         try:
             observation, reward, is_terminal, info = self.environment.step(request.action)
         except Exception as e:

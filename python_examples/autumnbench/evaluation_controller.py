@@ -148,7 +148,7 @@ class EvaluationControllerNoServer:
                     "reward": 0.0,
                     "interaction_steps": 0,
                     "test_steps": 0,
-                    "interaction_resets": 0
+                    "interaction_resets": 0,
                 }
                 for env_id in self.environments
             }
@@ -268,7 +268,8 @@ class EvaluationControllerNoServer:
         misc_info = {
             "interaction_steps": 0,
             "test_steps": 0,
-            "interaction_resets": 0
+            "interaction_resets": 0,
+            "resets": 0
         }
 
         try:
@@ -310,7 +311,6 @@ class EvaluationControllerNoServer:
             logger.info("Resetting environment")
             env_reset = env_stub.Reset(env_service_pb2.ResetRequest(), None)
             logger.info("Environment reset successfully")
-            misc_info["interaction_resets"] = 1
 
             agent_stub = agent_class()
             # Initialize agent
@@ -427,9 +427,24 @@ class EvaluationControllerNoServer:
                             info=step_response.info), None)
                 except grpc.RpcError as e:
                     logger.error(f"Failed to provide feedback to agent: {e}")
-
+                
+                if "resets" in step_response.info:
+                    misc_info["interaction_resets"] += step_response.info["resets"]
+                if "interaction_steps" in step_response.info:
+                    misc_info["interaction_steps"] = step_response.info["interaction_steps"]
+                elif hasattr(env_stub, 'transiting_state') and env_stub.transiting_state == "Interactive":
+                    misc_info["interaction_steps"] = env_stub.steps
+                elif hasattr(env_stub, 'transiting') and env_stub.transiting == "Interactive":
+                    misc_info["interaction_steps"] = env_stub.steps
+                elif env_id.endswith("_cd"):
+                    misc_info["test_steps"] = env_stub.steps
+                else:
+                    misc_info["test_steps"] = env_stub.steps
                 steps += 1
 
+                if "terminal_condition" in step_response.info:
+                    terminal_condition = step_response.info["terminal_condition"]
+                
                 # Determine terminal condition
                 if is_terminal:
                     terminal_condition = "default"
@@ -451,8 +466,6 @@ class EvaluationControllerNoServer:
                             )
                             raise ValueError(f"Unknown terminal condition: {observation_text}")
                 
-            misc_info["interaction_steps"] = steps
-
             # Episode complete
             logger.info(
                 f"Episode complete: steps={steps}, total_reward={total_reward}"
@@ -935,6 +948,9 @@ class EvaluationController:
 
                 steps += 1
 
+                if "terminal_condition" in step_response.info:
+                    terminal_condition = step_response.info["terminal_condition"]
+                
                 # Determine terminal condition
                 if is_terminal:
                     terminal_condition = "default"

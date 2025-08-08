@@ -367,7 +367,7 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
     def _simulate_from_start_given_actions(self, actions: List[Action], 
                     interpreter_seed: Optional[int] = None,
                     reference_observations: Optional[List[Observation]] = None,
-                    num_of_retries: int = 1,
+                    num_of_retries: int = 10000,
                     log_actions: bool = True
                     ) -> List[Observation]:
         """Simulates a trajectory using the world model given a list of actions.
