@@ -188,12 +188,11 @@ After the interactive phase you will be asked to use this knowledge about the en
 
 class ChangeDetectionEnvironment:
 
-    def __init__(self, env_name):
-        self.prog = open(f"{CURR_DIR}/modified_programs/{env_name}_wrong.sexp",
-                         "r").read()
-        self.event = open(
-            f"{CURR_DIR}/modified_programs/{env_name}_condition.sexp",
-            "r").read()
+    def __init__(self, env_name, data_dir=CURR_DIR):
+        self.prog = open(f"{data_dir}/programs/{env_name}_change_detection_wrong_program.sexp", "r").read()
+        with open(f"{data_dir}/answers/{env_name}_change_detection.json", "r") as f:
+            self.event = json.loads(f.read())['condition']
+
         self.is_terminal = False
         self.triggering_state = False
         self.trigger_start_time = None # the trigger frame is not set yet
@@ -304,9 +303,9 @@ class CDSliderEnvironment:
         self.env_name = env_name
         self.data_dir = data_dir
 
-        with open(f"{data_dir}/programs/{env_name}_wrong.sexp", "r") as f:
+        with open(f"{data_dir}/programs/{env_name}_change_detection_wrong_program.sexp", "r") as f:
             self.prog = f.read()
-        with open(f"{data_dir}/answers/{env_name}_condition.json", "r") as f:
+        with open(f"{data_dir}/answers/{env_name}_change_detection.json", "r") as f:
             self.event = json.loads(f.read())["condition"]
 
         self.id = str(uuid.uuid4())

@@ -178,6 +178,9 @@ class SimpleWMAgent:
             for _ in range(self.num_samples_mc):
                 final_state = self._simulate_for_consistent_final_state(
                     self.history["observations"], self.history["actions"])
+                if final_state is None:
+                    choice = random.randint(0, len(obs['choices']) - 1)
+                    return env_pb2.Action(text_data=f"choose_option_{choice}")
                 final_states.append(final_state)
             choice = self._make_mfp_choice(final_states, obs['obs_state'],
                                            obs['choices'])
@@ -485,9 +488,13 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
         state if it matches the real observations.
         This method will keep trying until it finds a consistent trajectory.
         """
-        return self._simulate_from_start_given_actions(
+        result = self._simulate_from_start_given_actions(
             actions, interpreter_seed=self.interpreter_seed,
-            reference_observations=observations)[-1]
+            reference_observations=observations)
+
+        if not result:
+            return None
+        return result[-1]
 
     def _check_for_change(self, next_obs: Observation, 
                           action_history: List[Action],
