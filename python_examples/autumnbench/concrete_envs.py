@@ -154,13 +154,13 @@ class InteractiveEnvironment:
 
     def get_instruction_text(self):
 ## MFP TASK DESCRIPTION
-        task_description = """In the test phase, you will step through frames from a trajectory in this same environment you interacted with (use the `step` action to step through the trajectory). Each frame is structured as a json object with the following fields:
-"render": the grid observed,
-"video_location": timestep at which the frame was observed,
-"action_took": action taken at this timestep,
-"is_finished": whether the episode is finished.
-You will step through the trajectory one frame at a time. Towards the end of the trajectory, parts of the grid will be masked (where the masked locations are marked as `mask`) and you will be given a set of choices to fill in the masked region at the final timestep. You need to choose option that fits the masked region at the final timestep.
-"""
+#         task_description = """In the test phase, you will step through frames from a trajectory in this same environment you interacted with (use the `step` action to step through the trajectory). Each frame is structured as a json object with the following fields:
+# "render": the grid observed,
+# "video_location": timestep at which the frame was observed,
+# "action_took": action taken at this timestep,
+# "is_finished": whether the episode is finished.
+# You will step through the trajectory one frame at a time. Towards the end of the trajectory, parts of the grid will be masked (where the masked locations are marked as `mask`) and you will be given a set of choices to fill in the masked region at the final timestep. You need to choose option that fits the masked region at the final timestep.
+# """
 ## CD TASK DESCRIPTION
 #         task_description = """In the test phase, you will interact with a changed version of the environment - where one of the dynamics rules has been changed. 
 # Your goal is to use you understanding of the environemnt from the interaction phase to detect the change. The environment will start in a normal state and then at some point, the environment will transition to a defective state. 
@@ -177,9 +177,6 @@ You will step through the trajectory one frame at a time. Towards the end of the
 During the interactive phase your goal is to act in the environment to understand the underlying rules of the environment. You can reset the environment to it's initial state at any time.
 Understand the environment and the dynamics of the environment well. Once you have understood the environment, you can select 'go-to-test' to go to the test phase.
 After the interactive phase you will be asked to use this knowledge about the environment to answer some questions about it.
-
-# Task Description:
-{task_description}
 """
 
     def terminal(self):
@@ -583,7 +580,7 @@ class PlanningEnvironment:
 
     def get_quit_observation(self) -> env_pb2.Observation:
         return env_pb2.Observation(
-            text_data="You quit the environment. No reward will be given.")
+            text_data="quit: You quit the environment. No reward will be given.")
 
     def reached_goal(self) -> bool:
         render_dict = json.loads(self.interpreter.render_all())

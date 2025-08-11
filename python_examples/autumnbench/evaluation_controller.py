@@ -461,10 +461,9 @@ class EvaluationControllerNoServer:
                         elif "fail" in observation_text:
                             terminal_condition = "fail"
                         else:
-                            logger.warning(
-                                f"Unknown terminal condition: {observation_text}"
-                            )
-                            raise ValueError(f"Unknown terminal condition: {observation_text}")
+                            # No terminal condition detected - this is normal for non-terminal states
+                            terminal_condition = "default"
+                            logger.debug(f"No terminal condition detected in observation: {observation_text[:100]}...")
                 
             # Episode complete
             logger.info(
