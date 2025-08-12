@@ -1,5 +1,5 @@
 {
-  "type": "defect_detection",
+  "type": "change_detection",
   "program": "ice",
   "wrong_program": "ice_wrong"
 }

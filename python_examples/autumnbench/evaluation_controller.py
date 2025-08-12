@@ -15,8 +15,8 @@ from generated.mara import mara_agent_pb2 as agent_pb2
 from generated.mara import mara_agent_pb2_grpc as agent_grpc
 from generated.mara import mara_evaluation_controller_pb2 as controller_pb2
 from generated.mara import mara_evaluation_controller_pb2_grpc as controller_grpc
-from .environment_interfaces import MARACompositeAutumnDefectDetectionServicer, MARACompositeAutumnActionPredictionServicer
-from .environment_interfaces_mcq import MARACompositeAutumnMCQServicer
+from .environment_interfaces import MARACompositeAutumnChangeDetectionServicer, MARACompositeAutumnPlanningServicer
+from .environment_interfaces_mfp import MARACompositeAutumnMFPServicer
 from .agent import MARARandomAgentServicer
 from .llm_agent import ReactLLMAgentServicer, ReactLLMAgent2, SummaryReactLLMAgent, ReactVLMAgent, UnifiedReactAgent
 from .simple_wm_agent import SimpleWMAgentServicer
@@ -36,7 +36,7 @@ class EvaluationControllerNoServer:
         self.configs: Dict[str, Dict[str, str]] = {}
         self.current_environment: Optional[str] = None
         self.environment_sequence: List[str] = []
-        self.environment_rewards: Dict[str, float] = {}
+        self.environment_rewards: Dict[str, Dict[str, Any]] = {}
         self.aggregate_reward: float = 0.0
         self.evaluation_complete: bool = False
         self.environment_ids: List[str] = []
@@ -96,7 +96,12 @@ class EvaluationControllerNoServer:
 
         # Initialize rewards for environments that exist
         for env_id in self.environments:
-            self.environment_rewards[env_id] = 0.0
+            self.environment_rewards[env_id] = {
+                "reward": 0.0,
+                "interaction_steps": 0,
+                "test_steps": 0,
+                "interaction_resets": 0
+            }
 
         # Store available transitions (only those involving available environments)
         for transition in transitions:
@@ -139,7 +144,12 @@ class EvaluationControllerNoServer:
         if reset:
             self.environment_sequence = []
             self.environment_rewards = {
-                env_id: 0.0
+                env_id: {
+                    "reward": 0.0,
+                    "interaction_steps": 0,
+                    "test_steps": 0,
+                    "interaction_resets": 0,
+                }
                 for env_id in self.environments
             }
             self.aggregate_reward = 0.0
@@ -180,7 +190,7 @@ class EvaluationControllerNoServer:
             logger.info(
                 f"Running environment: {env_id}, agent: {self.config.get('agent', 'autumn_llm_interactive_agent_v1')}"
             )
-            reward, terminal_condition, final_state = self.run_environment(
+            reward, terminal_condition, final_state, misc_info = self.run_environment(
                 env_id, self.agents[self.config.get(
                     "agent", "autumn_llm_interactive_agent_v1")])
             logger.info(
@@ -188,7 +198,10 @@ class EvaluationControllerNoServer:
             )
 
             # Store reward
-            self.environment_rewards[env_id] += reward
+            self.environment_rewards[env_id]["reward"] += reward
+            self.environment_rewards[env_id]["interaction_steps"] = misc_info["interaction_steps"]
+            self.environment_rewards[env_id]["test_steps"] = misc_info["test_steps"]
+            self.environment_rewards[env_id]["interaction_resets"] = misc_info["interaction_resets"]
 
             # Check for transition
             next_env = None
@@ -245,30 +258,33 @@ class EvaluationControllerNoServer:
     def run_environment(self,
                         env_id: str,
                         agent_class,
-                        max_steps: int = 301) -> Tuple[float, str, str]:
+                        max_steps: int = 501) -> Tuple[float, str, str, Dict[str, Any]]:
         """Run a single environment episode"""
         logger.info(f"Attempting to run environment: {env_id}")
         print(f"Environment map: {self.environments}"
               )  # Print the environments map
         print(f"Looking up endpoint for {env_id}")
         observation_text = ""
+        misc_info = {
+            "interaction_steps": 0,
+            "test_steps": 0,
+            "interaction_resets": 0,
+            "resets": 0
+        }
 
         try:
             # Create environment stub
             env_stub = None
             if "_mfp" in env_id:
-                env_stub = MARACompositeAutumnMCQServicer()
-            elif "_dd" in env_id:
-                env_stub = MARACompositeAutumnDefectDetectionServicer()
+                env_stub = MARACompositeAutumnMFPServicer()
+            elif "_cd" in env_id:
+                env_stub = MARACompositeAutumnChangeDetectionServicer()
             elif "_planning" in env_id:
-                env_stub = MARACompositeAutumnActionPredictionServicer()
+                env_stub = MARACompositeAutumnPlanningServicer()
             else:
                 logger.error(f"No environment stub found for {env_id}")
-                return 0.0, "error", f"No environment stub found for {env_id}"
-
-            # try:
-            #     logger.info("Initializing environment")
-            # import pdb; pdb.set_trace();
+                return 0.0, "error", f"No environment stub found for {env_id}", misc_info
+            
             env_init = env_stub.Initialize(
                 env_service_pb2.InitializeRequest(
                     env_type=env_pb2.REACTIVE,
@@ -276,10 +292,9 @@ class EvaluationControllerNoServer:
                         env_id, {
                             "env_name":
                             "_".join(env_id.split("_")[:-2]),
-                            "per_env_max_steps":
-                            str(self.config.get("per_env_max_steps", 25)),
-                            "stack_frames":
-                            str(self.config.get("stack_frames", 0)),
+                            "max_interaction_steps":
+                            str(self.config.get("max_interaction_steps", 25)),
+                            "stack_frames": str(self.config.get("stack_frames", False)),
                             "skip_frames":
                             str(self.config.get("skip_frames", False)),
                             "render_mode":
@@ -292,9 +307,6 @@ class EvaluationControllerNoServer:
                             self.config.get("data_dir", "./data")
                         })), None)
             logger.info(f"Environment initialized: {env_init.message}")
-            # except grpc.RpcError as e:
-            #     logger.error(f"Failed to initialize environment: {e}")
-            #     return 0.0, "error", f"Initialization failed: {str(e)}"
 
             logger.info("Resetting environment")
             env_reset = env_stub.Reset(env_service_pb2.ResetRequest(), None)
@@ -323,9 +335,9 @@ class EvaluationControllerNoServer:
                         "hint":
                         str(self.config.get("hint", False)),
                         "task_name":
-                        self.config.get("task_name", "mcq"),
+                        self.config.get("task_name", "mfp"),
                         "stack_frames":
-                        str(self.config.get("stack_frames", 0)),
+                        str(self.config.get("stack_frames", False)),
                         "skip_frames":
                         str(self.config.get("skip_frames", False)),
                         "render_mode":
@@ -389,6 +401,7 @@ class EvaluationControllerNoServer:
                             action=act_response.action), None)
                     reward = step_response.reward
                     is_terminal = step_response.is_terminal
+
                     total_reward += reward
                     logger.info(
                         f"Step result: reward={reward}, terminal={is_terminal}"
@@ -414,9 +427,24 @@ class EvaluationControllerNoServer:
                             info=step_response.info), None)
                 except grpc.RpcError as e:
                     logger.error(f"Failed to provide feedback to agent: {e}")
-
+                
+                if "resets" in step_response.info:
+                    misc_info["interaction_resets"] += step_response.info["resets"]
+                if "interaction_steps" in step_response.info:
+                    misc_info["interaction_steps"] = step_response.info["interaction_steps"]
+                elif hasattr(env_stub, 'transiting_state') and env_stub.transiting_state == "Interactive":
+                    misc_info["interaction_steps"] = env_stub.steps
+                elif hasattr(env_stub, 'transiting') and env_stub.transiting == "Interactive":
+                    misc_info["interaction_steps"] = env_stub.steps
+                elif env_id.endswith("_cd"):
+                    misc_info["test_steps"] = env_stub.steps
+                else:
+                    misc_info["test_steps"] = env_stub.steps
                 steps += 1
 
+                if "terminal_condition" in step_response.info:
+                    terminal_condition = step_response.info["terminal_condition"]
+                
                 # Determine terminal condition
                 if is_terminal:
                     terminal_condition = "default"
@@ -433,11 +461,10 @@ class EvaluationControllerNoServer:
                         elif "fail" in observation_text:
                             terminal_condition = "fail"
                         else:
-                            logger.warning(
-                                f"Unknown terminal condition: {observation_text}"
-                            )
-                            # raise ValueError(f"Unknown terminal condition: {observation_text}")
-
+                            # No terminal condition detected - this is normal for non-terminal states
+                            terminal_condition = "default"
+                            logger.debug(f"No terminal condition detected in observation: {observation_text[:100]}...")
+                
             # Episode complete
             logger.info(
                 f"Episode complete: steps={steps}, total_reward={total_reward}"
@@ -461,12 +488,12 @@ class EvaluationControllerNoServer:
             except grpc.RpcError as e:
                 logger.error(f"Failed to close environment: {e}")
 
-            return total_reward, "default", observation_text
+            return total_reward, "default", observation_text, misc_info
 
         except Exception as e:
             logger.exception(
                 f"Unexpected error running environment {env_id}: {e}")
-            return 0.0, "error", f"Unexpected error: {str(e)}"
+            return 0.0, "error", f"Unexpected error: {str(e)}", misc_info
 
     def get_state(self) -> Dict[str, Any]:
         """Get current evaluation state"""
@@ -498,7 +525,8 @@ class EvaluationControllerNoServer:
         """Calculate aggregate reward (R_C function in the paper)"""
         # Simple implementation: sum of rewards
         # A more complex implementation could use weights or other transformations
-        return sum(environment_rewards.values())
+        
+        return sum([env_reward["reward"] for env_reward in environment_rewards.values()])
 
     def get_transition_message(self, from_env: str, to_env: str) -> str:
         """Get transition message (O_C function in the paper)"""
@@ -531,21 +559,21 @@ class EvaluationController:
         # Only use the text adventure environment on its actual port
         self.environments = {
             **{
-                f"{eid}_interactive_mcq": f"localhost:{port}"
+                f"{eid}_interactive_mfp": f"localhost:{port}"
                 for eid, port in zip(
                     environment_ids,
                     range(50050, 50050 + len(environment_ids) * 3, 3))
             },
-            # **{f"{eid}_interactive_dd": f"localhost:{port}" for eid, port in zip(environment_ids, range(50051, 50051 + len(environment_ids)*3, 3))},
+            # **{f"{eid}_interactive_cd": f"localhost:{port}" for eid, port in zip(environment_ids, range(50051, 50051 + len(environment_ids)*3, 3))},
         }
         print(f"Environments: {environment_ids}")
         self.transitions = {
             **{
-                f"{environment_ids[eid]}_interactive_mcq": {
-                    "default": f"{environment_ids[eid + 1]}_interactive_mcq",
-                    "quit": f"{environment_ids[eid + 1]}_interactive_mcq",
-                    "finish": f"{environment_ids[eid + 1]}_interactive_mcq",
-                    "fail": f"{environment_ids[eid + 1]}_interactive_mcq",
+                f"{environment_ids[eid]}_interactive_mfp": {
+                    "default": f"{environment_ids[eid + 1]}_interactive_mfp",
+                    "quit": f"{environment_ids[eid + 1]}_interactive_mfp",
+                    "finish": f"{environment_ids[eid + 1]}_interactive_mfp",
+                    "fail": f"{environment_ids[eid + 1]}_interactive_mfp",
                 }
                 for eid in range(len(environment_ids) - 1)
             },
@@ -553,42 +581,42 @@ class EvaluationController:
 
         self.transition_messages = {
             **{
-                f"{environment_ids[eid]}_interactive_mcq": {
-                    "default": f"{environment_ids[eid + 1]}_interactive_mcq",
-                    "quit": f"{environment_ids[eid + 1]}_interactive_mcq",
-                    "finish": f"{environment_ids[eid + 1]}_interactive_mcq",
-                    "fail": f"{environment_ids[eid + 1]}_interactive_mcq",
+                f"{environment_ids[eid]}_interactive_mfp": {
+                    "default": f"{environment_ids[eid + 1]}_interactive_mfp",
+                    "quit": f"{environment_ids[eid + 1]}_interactive_mfp",
+                    "finish": f"{environment_ids[eid + 1]}_interactive_mfp",
+                    "fail": f"{environment_ids[eid + 1]}_interactive_mfp",
                 }
                 for eid in range(len(environment_ids) - 1)
             },
         }
 
         # self.transitions = {
-        #     **{f"{eid}_interactive_mcq": {
-        #         "default": f"{eid}_interactive_dd",
-        #         "quit": f"{eid}_interactive_dd",
-        #         "finish": f"{eid}_interactive_dd",
-        #         "fail": f"{eid}_interactive_dd",
+        #     **{f"{eid}_interactive_mfp": {
+        #         "default": f"{eid}_interactive_cd",
+        #         "quit": f"{eid}_interactive_cd",
+        #         "finish": f"{eid}_interactive_cd",
+        #         "fail": f"{eid}_interactive_cd",
         #     } for eid in environment_ids},
-        #     **{f"{environment_ids[eid]}_interactive_dd": {
-        #         "default": f"{environment_ids[eid + 1]}_interactive_mcq",
-        #         "quit": f"{environment_ids[eid + 1]}_interactive_mcq",
-        #         "finish": f"{environment_ids[eid + 1]}_interactive_mcq",
-        #         "fail": f"{environment_ids[eid + 1]}_interactive_mcq",
+        #     **{f"{environment_ids[eid]}_interactive_cd": {
+        #         "default": f"{environment_ids[eid + 1]}_interactive_mfp",
+        #         "quit": f"{environment_ids[eid + 1]}_interactive_mfp",
+        #         "finish": f"{environment_ids[eid + 1]}_interactive_mfp",
+        #         "fail": f"{environment_ids[eid + 1]}_interactive_mfp",
         #     } for eid in range(len(environment_ids) - 1)},
         # }
         # self.transition_messages = {
-        #     **{f"{eid}_interactive_mcq": {
-        #         "default": f"{eid}_interactive_dd",
-        #         "quit": f"{eid}_interactive_dd",
-        #         "finish": f"{eid}_interactive_dd",
-        #         "fail": f"{eid}_interactive_dd",
+        #     **{f"{eid}_interactive_mfp": {
+        #         "default": f"{eid}_interactive_cd",
+        #         "quit": f"{eid}_interactive_cd",
+        #         "finish": f"{eid}_interactive_cd",
+        #         "fail": f"{eid}_interactive_cd",
         #     } for eid in environment_ids},
-        #     **{f"{environment_ids[eid]}_interactive_dd": {
-        #         "default": f"{environment_ids[eid]}_interactive_mcq",
-        #         "quit": f"{environment_ids[eid]}_interactive_mcq",
-        #         "finish": f"{environment_ids[eid]}_interactive_mcq",
-        #         "fail": f"{environment_ids[eid]}_interactive_mcq",
+        #     **{f"{environment_ids[eid]}_interactive_cd": {
+        #         "default": f"{environment_ids[eid]}_interactive_mfp",
+        #         "quit": f"{environment_ids[eid]}_interactive_mfp",
+        #         "finish": f"{environment_ids[eid]}_interactive_mfp",
+        #         "fail": f"{environment_ids[eid]}_interactive_mfp",
         #     } for eid in range(len(environment_ids) - 1)},
         # }
         self.agents = {
@@ -684,7 +712,7 @@ class EvaluationController:
             )
             reward, terminal_condition, final_state = self.run_environment(
                 env_id, self.agents[self.config.get(
-                    "agent", "autumn_llm_interactive_agent_v1")])
+                    "agent", "autumn_llm_interactive_agent_v1")], max_steps=self.config.get("max_steps", 301))
             logger.info(
                 f"Environment run complete. Reward: {reward}, Terminal condition: {terminal_condition}"
             )
@@ -747,7 +775,7 @@ class EvaluationController:
     def run_environment(self,
                         env_id: str,
                         agent_endpoint: str,
-                        max_steps: int = 201) -> Tuple[float, str, str]:
+                        max_steps: int = 501) -> Tuple[float, str, str]:
         """Run a single environment episode"""
         logger.info(f"Attempting to run environment: {env_id}")
         print(f"Environment map: {self.environments}"
@@ -762,10 +790,12 @@ class EvaluationController:
 
             # Create environment stub
             env_stub = None
-            if "_mcq" in env_id:
-                env_stub = MARACompositeAutumnMCQServicer()
-            elif "_dd" in env_id:
-                env_stub = MARACompositeAutumnServicer()
+            if "_mfp" in env_id:
+                env_stub = MARACompositeAutumnMFPServicer()
+            elif "_cd" in env_id:
+                env_stub = MARACompositeAutumnChangeDetectionServicer()
+            elif "_planning" in env_id:
+                env_stub = MARACompositeAutumnPlanningServicer()
             else:
                 logger.error(f"No environment stub found for {env_id}")
                 return 0.0, "error", f"No environment stub found for {env_id}"
@@ -801,7 +831,7 @@ class EvaluationController:
                         config=self.configs.get(
                             env_id, {
                                 "env_name": "_".join(env_id.split("_")[:-2]),
-                                "per_env_max_steps": "100"
+                                "max_interaction_steps": "100"
                             })),
                     timeout=10)
                 logger.info(f"Environment initialized: {env_init.message}")
@@ -917,6 +947,9 @@ class EvaluationController:
 
                 steps += 1
 
+                if "terminal_condition" in step_response.info:
+                    terminal_condition = step_response.info["terminal_condition"]
+                
                 # Determine terminal condition
                 if is_terminal:
                     terminal_condition = "default"

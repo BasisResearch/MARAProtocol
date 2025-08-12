@@ -1,5 +1,5 @@
 from .environment_interfaces import MARAInteractiveServicer, env_grpc, env_pb2, env_service_pb2
-from .concrete_envs import MARAMCQEnvironment
+from .concrete_envs import MARAMFPEnvironment
 import os
 import json
 import random
@@ -8,13 +8,13 @@ from typing import Dict, Any, Tuple, List
 import logging
 
 logging.basicConfig(level=logging.INFO,
-                    filename="log_environment_interfaces_mcq.txt")
+                    filename="log_environment_interfaces_mfp.txt")
 # Create file if it doesn't exist
-if not os.path.exists("log_environment_interfaces_mcq.txt"):
-    with open("log_environment_interfaces_mcq.txt", "w") as f:
+if not os.path.exists("log_environment_interfaces_mfp.txt"):
+    with open("log_environment_interfaces_mfp.txt", "w") as f:
         pass
 logger = logging.getLogger(__name__)
-fh = logging.FileHandler("log_environment_interfaces_mcq.txt")
+fh = logging.FileHandler("log_environment_interfaces_mfp.txt")
 logger.addHandler(fh)
 
 import numpy as np
@@ -22,23 +22,23 @@ import numpy as np
 CURR_DIR = os.path.dirname(os.path.realpath(__file__))
 
 
-class MARAMCQServicer(MARAInteractiveServicer):
+class MARAMFPServicer(MARAInteractiveServicer):
 
     def __init__(self):
         pass
 
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
-        self.environment = MARAMCQEnvironment(
+        self.environment = MARAMFPEnvironment(
             request.config["env_name"],
             render_mode=request.config["render_mode"],
             logging_path=request.config["logging_path"],
             data_dir=request.config["data_dir"])
         response = env_service_pb2.InitializeResponse(
             success=True,
-            message=f"MCQ Environment initialized: {request.config['env_name']}"
+            message=f"MFP Environment initialized: {request.config['env_name']}"
         )
         reactive_env = env_pb2.ReactiveEnvironment(
-            environment_id=f"{request.config['env_name']}_v1_mcq",
+            environment_id=f"{request.config['env_name']}_v1_mfp",
             version="1.0.0",
             metadata={
                 "author": "MARA Developer",
@@ -49,7 +49,7 @@ class MARAMCQServicer(MARAInteractiveServicer):
 
     def GetEnvironmentInfo(self, request, context):
         return env_service_pb2.EnvironmentInfoResponse(
-            environment_id=f"{self.environment.env_name}_v1_mcq",
+            environment_id=f"{self.environment.env_name}_v1_mfp",
             version="1.0.0",
             env_type=env_pb2.REACTIVE,
             capabilities={
@@ -62,21 +62,22 @@ class MARAMCQServicer(MARAInteractiveServicer):
             })
 
 
-class MARACompositeAutumnMCQServicer(MARAInteractiveServicer):
+class MARACompositeAutumnMFPServicer(MARAInteractiveServicer):
 
     def __init__(self):
         self.interactive_environment = MARAInteractiveServicer()
-        self.mcq_environment = MARAMCQServicer()
+        self.mfp_environment = MARAMFPServicer()
         self.current_environment = self.interactive_environment
-        self.transiting_state = "Interactive"  # InteractiveReset-> Interactive -> Transit -> MCQReset -> MCQ -> End.
+        self.transiting_state = "Interactive"  # InteractiveReset-> Interactive -> Transit -> MFPReset -> MFP -> End.
         self.env_name = None
 
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
         self.env_name = request.config["env_name"]
-        self.per_env_max_steps = int(request.config["per_env_max_steps"])
+        self.max_interaction_steps = int(request.config["max_interaction_steps"])
         self.render_mode = request.config["render_mode"]
         self.data_dir = request.config["data_dir"]
         self.logging_path = request.config["logging_path"]
+        self.current_environment = self.interactive_environment
         return self.current_environment.Initialize(request, context)
 
     def Reset(self, request, context):
@@ -90,47 +91,50 @@ class MARACompositeAutumnMCQServicer(MARAInteractiveServicer):
         self.steps += 1
         if self.transiting_state == "Interactive":
             step_response = self.current_environment.Step(request, context)
-            observation, reward, is_terminal, info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
-            if is_terminal and self.current_environment == self.interactive_environment:
-                self.current_environment = self.mcq_environment
+            observation, reward, is_terminal, response_info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
+            if (is_terminal and self.current_environment == self.interactive_environment) or \
+               (self.steps >= self.max_interaction_steps):
+                info = {'interaction_steps': self.steps}
+                self.current_environment = self.mfp_environment
                 self.transiting_state = "Transition"
-                step_response.is_terminal = False
                 self.steps = 0
-            elif self.steps >= self.per_env_max_steps:
-                self.current_environment = self.mcq_environment
-                self.transiting_state = "Transition"
+
+                init_req = env_service_pb2.InitializeRequest(
+                    config={
+                        "env_name": self.env_name,
+                        "render_mode": self.render_mode,
+                        "data_dir": self.data_dir,
+                        "logging_path": self.logging_path
+                    })
+                self.mfp_environment.Initialize(init_req, context)
+                reset_req = env_service_pb2.ResetRequest()
+                self.mfp_environment.Reset(reset_req, context)
+                observation = self.mfp_environment.environment.get_observation()
+                self.transiting_state = "MFP"
+                
+                step_response.observation.CopyFrom(observation)
+                step_response.reward = 0
                 step_response.is_terminal = False
-                self.steps = 0
+                step_response.info.clear()
+                step_response.info.update({str(k): str(v) for k, v in info.items()})
+                return step_response
             return step_response
-        elif self.transiting_state == "Transition":
-            self.current_environment = self.mcq_environment
-            init_req = env_service_pb2.InitializeRequest(
-                config={
-                    "env_name": self.env_name,
-                    "render_mode": self.render_mode,
-                    "data_dir": self.data_dir,
-                    "logging_path": self.logging_path
-                })
-            self.mcq_environment.Initialize(init_req, context)
-            reset_req = env_service_pb2.ResetRequest()
-            self.mcq_environment.Reset(reset_req, context)
-            observation = self.mcq_environment.environment.get_observation()
-            self.transiting_state = "MCQ"
-            return env_service_pb2.StepResponse(observation=observation,
-                                                reward=0,
-                                                is_terminal=False,
-                                                info={})
-        elif self.transiting_state == "MCQ":
-            step_response = self.mcq_environment.Step(request, context)
-            observation, reward, is_terminal, info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
+        elif self.transiting_state == "MFP":
+            step_response = self.mfp_environment.Step(request, context)
+            observation, reward, is_terminal, response_info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
+            info = dict(response_info)
+            info['test_steps'] = self.steps
             if is_terminal:
                 self.transiting_state = "End"
                 step_response.is_terminal = True
+            
+            step_response.info.clear()
+            step_response.info.update({str(k): str(v) for k, v in info.items()})
             return step_response
         elif self.transiting_state == "End":
             return env_service_pb2.StepResponse(
                 observation=env_pb2.Observation(
-                    text_data="MCQ environment ended."),
+                    text_data="MFP environment ended."),
                 reward=0,
                 is_terminal=True,
                 info={})
@@ -141,22 +145,22 @@ class MARACompositeAutumnMCQServicer(MARAInteractiveServicer):
     def QuerySpaces(self, request, context):
         if self.transiting_state == "Interactive":
             return self.current_environment.QuerySpaces(request, context)
-        elif self.transiting_state == "MCQ":
-            return self.mcq_environment.QuerySpaces(request, context)
-        elif self.transiting_state == "MCQReset":
-            return self.mcq_environment.QuerySpaces(request, context)
+        elif self.transiting_state == "MFP":
+            return self.mfp_environment.QuerySpaces(request, context)
+        elif self.transiting_state == "MFPReset":
+            return self.mfp_environment.QuerySpaces(request, context)
         else:
             return env_service_pb2.SpaceQueryResponse(
                 reactive_response=env_pb2.ReactiveEnvironment.
                 ActionSpaceResponse(
                     action_space=env_pb2.ReactiveEnvironment.ActionSpace(
-                        available_actions=[env_pb2.Action(text_data="NOP")])))
+                        available_actions=[env_pb2.Action(text_data="noop")])))
 
     def Close(self, request, context):
         return self.current_environment.Close(request, context)
 
 
-class MARAROBOSIMMCQEnvironment:
+class MARAROBOSIMMFPEnvironment:
 
     def __init__(self, env_name):
         self.env_name = env_name
@@ -172,7 +176,7 @@ class MARAROBOSIMMCQEnvironment:
         self.current_video = "reference"
         # Load the test cases from a JSON file
         self.data = json.load(
-            open(f"{CURR_DIR}/robosim_mcqs/{self.env_name}.json"))
+            open(f"{CURR_DIR}/robosim_mfps/{self.env_name}.json"))
         self.current_time = 0
         self.current_question = 0
         self.choices_made = []
@@ -303,21 +307,21 @@ class MARAROBOSIMMCQEnvironment:
                0, self.terminal(), {}
 
 
-class MARAROBOSIMMCQServicer(MARAInteractiveServicer):
+class MARAROBOSIMMFPServicer(MARAInteractiveServicer):
 
     def __init__(self):
         pass
 
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
-        self.environment = MARAROBOSIMMCQEnvironment(
+        self.environment = MARAROBOSIMMFPEnvironment(
             request.config["env_name"])
         response = env_service_pb2.InitializeResponse(
             success=True,
             message=
-            f"Robosim MCQ Environment initialized: {request.config['env_name']}"
+            f"Robosim MFP Environment initialized: {request.config['env_name']}"
         )
         reactive_env = env_pb2.ReactiveEnvironment(
-            environment_id=f"{request.config['env_name']}_v1_robosim_mcq",
+            environment_id=f"{request.config['env_name']}_v1_robosim_mfp",
             version="1.0.0",
             metadata={
                 "author": "MARA Developer",
@@ -351,6 +355,7 @@ class MARAROBOSIMMCQServicer(MARAInteractiveServicer):
                           "Environment not initialized")
 
         action_text = request.action.text_data
+        observation, reward, is_terminal, info = None, 0, False, {}
         try:
             observation, reward, is_terminal, info = self.environment.step(
                 action_text)

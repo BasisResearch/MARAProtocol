@@ -5,7 +5,6 @@ import numpy as np
 import json
 from typing import Any, Dict, List, Union, Optional
 from abc import abstractmethod
-import yaml
 from collections import deque
 import itertools
 
@@ -17,7 +16,6 @@ from .concrete_envs import InteractiveEnvironment
 from .interpreter_module import Interpreter
 from .autumnstdlib import autumnstdlib
 from .env_utils import load_yaml_to_dict
-from .concrete_envs import convert_to_grid
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -27,6 +25,45 @@ if not logger.handlers:
 Observation = np.ndarray[str]
 Action = str
 
+def convert_to_grid(
+        obs_json: Dict[str, Any],
+        background_color: int,
+        color_dict: Dict[str, int],
+        grid_size: int,
+        use_color_str: bool = False) -> List[List[Union[int, str]]]:
+    """Convert the observation JSON to a grid."""
+    grid_size = obs_json.get("GRID_SIZE", 0)
+
+    if use_color_str:
+        color_int_to_str = {v: k for k, v in color_dict.items()}
+        grid = [[color_int_to_str[background_color] for _ in range(grid_size)]
+                for _ in range(grid_size)]  # background is 1 by default
+    else:
+        grid = [[background_color for _ in range(grid_size)]
+                for _ in range(grid_size)]  # background is 1 by default
+
+    # Fill in objects from the observation data
+    for obj_type, objects in obs_json.items():
+        if obj_type == "GRID_SIZE":
+            continue
+
+        for obj in objects:
+            x = obj["position"]["x"]
+            y = obj["position"]["y"]
+            color = obj["color"]
+
+            if 0 <= x < grid_size and 0 <= y < grid_size:
+                if color in color_dict:
+                    if use_color_str:
+                        grid[y][x] = color
+                    else:
+                        grid[y][x] = color_dict[color]
+                else:
+                    raise ValueError(
+                        f"Color {color} not found in color_dict. Please add it to the color_dict.yaml file."
+                    )
+
+    return grid
 
 class SimpleWMAgent:
     """
@@ -38,7 +75,7 @@ class SimpleWMAgent:
     def __init__(self, config: dict):
         """Initializes the agent with configuration and sets up the initial state."""
         self.config = config
-        self.task_name = self.config.get("task_name", "mcq")
+        self.task_name = self.config.get("task_name", "mfp")
         self.num_samples_mc = int(self.config.get("num_samples_mc", 1))
         self.history = {}
         self.phase = 'interaction'  # Initialize phase
@@ -55,15 +92,18 @@ class SimpleWMAgent:
                               available_actions: list[env_pb2.Action],
                               exclude_giveup: bool = False,
                               exclude_found_fault: bool = False,
-                              exclude_submit: bool = False) -> env_pb2.Action:
+                              exclude_submit: bool = False,
+                              exclude_reset: bool = False) -> env_pb2.Action:
         """Takes a random action. Used for the interactive phase of all tasks."""
         new_available_actions = []
         for action in available_actions:
-            if exclude_giveup and action.text_data == "quit":
+            if exclude_giveup and (action.text_data == "quit" or action.text_data == "go-to-test"):
                 continue
-            if exclude_found_fault and action.text_data == "I found the fault!":
+            if exclude_found_fault and action.text_data == "I found the change!":
                 continue
             if exclude_submit and action.text_data == "submit":
+                continue
+            if exclude_reset and action.text_data == "reset":
                 continue
             new_available_actions.append(action)
         available_actions = new_available_actions
@@ -87,15 +127,17 @@ class SimpleWMAgent:
     
     def _expand_actions(self, available_actions: List[env_pb2.Action],
                         exclude_quit: bool = False,
-                        exclude_submit: bool = False
+                        exclude_submit: bool = False,
+                        exclude_reset: bool = True
                         ) -> List[env_pb2.Action]:
-        """Expend the actions that contain click with range to all possible
-        actions."""
+        """Expend the actions that contain click with range to all possible actions."""
         expanded_actions = []
         for action in available_actions:
             if exclude_quit and action.text_data == "quit":
                 continue
             if exclude_submit and action.text_data == "submit":
+                continue
+            if exclude_reset and action.text_data == "reset":
                 continue
             action_str = action.text_data
             if 'click' in action_str and len(action_str.split(' ')) == 3:
@@ -113,15 +155,15 @@ class SimpleWMAgent:
                 expanded_actions.append(action)
         return expanded_actions
 
-    def _act_mcq_eval(
+    def _act_mfp_eval(
             self, obs: Dict[str, Any],
             available_actions: list[env_pb2.Action]) -> env_pb2.Action:
-        """Selects an MCQ choice using the specified Monte Carlo strategy."""
+        """Selects an MFP choice using the specified Monte Carlo strategy."""
         if len(available_actions) == 1:
             # Not at the stage of making a choice yet, save the action and
             # store the observation
             self.history["observations"].append(obs['obs_state'])
-            if obs['video_location'] != 0:
+            if int(obs['video_location'].split('/')[0]) != 0:
                 self.history["actions"].append(obs['action_took'])
             return self._sample_random_action(available_actions)
         else:
@@ -130,21 +172,25 @@ class SimpleWMAgent:
             # Take the most common choice among the consistent samples
             # If no consistent samples, fallback to random action
             self.history["observations"].append(obs['obs_state'])
-            self.history["actions"].append(obs['action_took'])
+            if int(obs['video_location'].split('/')[0]) != 0:
+                self.history["actions"].append(obs['action_took'])
             final_states = []
             for _ in range(self.num_samples_mc):
                 final_state = self._simulate_for_consistent_final_state(
                     self.history["observations"], self.history["actions"])
+                if final_state is None:
+                    choice = random.randint(0, len(obs['choices']) - 1)
+                    return env_pb2.Action(text_data=f"choose_option_{choice}")
                 final_states.append(final_state)
-            choice = self._make_mcq_choice(final_states, obs['obs_state'],
-                                           obs['options'])
+            choice = self._make_mfp_choice(final_states, obs['obs_state'],
+                                           obs['choices'])
             return env_pb2.Action(text_data=f"choose_option_{choice}")
 
-    def _act_dd_eval(
+    def _act_cd_eval(
             self, obs: Observation,
             available_actions: list[env_pb2.Action]) -> env_pb2.Action:
-        """Acts in the DD evaluation phase.
-        A simpler solver for defect detection. It compars the received 
+        """Acts in the CD evaluation phase.
+        A simpler solver for change detection. It compars the received 
         observation with the observation predicted from its world model, and 
         declare defect is here if they differ.
         TODO: Take the potential stochasticity into account and compute the
@@ -153,26 +199,21 @@ class SimpleWMAgent:
         If the agent has found a defect, it will report it.
         Otherwise, it will act randomly, excluding the 'give up' action.
         """
-        # If it's the first observation, then skip the check
-        if self.history["actions"]:
-            # If the agent has already taken an action, check for defects
-            # based on the previous observation and action.
-            found_defect = self._check_for_defect(obs, self.history["actions"])
-        else:
-            found_defect = False
+        found_defect = self._check_for_change(obs, self.history["actions"])
 
         # If the agent thinks it has found a defect and the `found fault` action
         # is available, which is only available after a few interactions, return
         # the action to report it.
         if found_defect:
-            if any(action.text_data == "I found the fault!"
+            if any(action.text_data == "I found the change!"
                    for action in available_actions):
-                return env_pb2.Action(text_data="I found the fault!")
+                return env_pb2.Action(text_data="I found the change!")
 
         # Otherwise, act randomly, excluding the 'give up' action.
         action = self._sample_random_action(available_actions,
                                             exclude_giveup=True,
-                                            exclude_found_fault=True)
+                                            exclude_found_fault=True, 
+                                            exclude_reset=True)
         self.history["actions"].append(action.text_data)
         return action
 
@@ -190,7 +231,7 @@ class SimpleWMAgent:
     def act(self, observation: env_pb2.Observation,
             available_actions: list[env_pb2.Action]) -> env_pb2.Action:
         """Determines the agent's action based on its current phase."""
-        logging.info(f"available_action: {available_actions}")
+        # logging.info(f"available_action: {available_actions}")
         # self.history['observations'].append(observation)
 
         # Check for phase transition trigger
@@ -201,7 +242,7 @@ class SimpleWMAgent:
             logger.info(f"Phase transition triggered in agent. New phase: "
                         f"'{self.phase}'.")
             # Choose the default action to enter the evaluation phase
-            if self.task_name == 'mcq':
+            if self.task_name == 'mfp':
                 start = observation.text_data.find('{')
                 observation.text_data = observation.text_data[start:]
             else:
@@ -209,34 +250,51 @@ class SimpleWMAgent:
 
         # Dispatch action based on the current phase
         if self.phase == 'interaction':
-            action = self._sample_random_action(available_actions)
+            # action = self._sample_random_action(available_actions)
+            # action = env_pb2.Action(text_data="go-to-test") # go to test phase directly
+            self.phase = 'evaluation'
+            logger.info(f"Phase transition triggered in agent. New phase: '{self.phase}'.")
+            return env_pb2.Action(text_data="go-to-test")
 
         elif self.phase == 'evaluation':
             if self.task_name == 'mfp':
                 obs_dict = parse_text_obs_to_dict(observation.text_data)
-                action = self._act_mcq_eval(obs_dict, available_actions)
-            elif self.task_name == 'dd':
-                # If the option `The fault is here!` is available, it means
+                action = self._act_mfp_eval(obs_dict, available_actions)
+            elif self.task_name == 'cd':
+                # If the option `Submit choice` is available, it means
                 # the agent has found the previous observation to be a defect.
-                # So it would choose `The fault is here!` action.
+                # So it would choose `Submit choice` action.
                 fault_is_here_available = any(
-                            action.text_data == "The fault is here!"
+                            action.text_data == "Submit choice"
                         for action in available_actions)
                 if fault_is_here_available:
-                    return env_pb2.Action(text_data="The fault is here!")
+                    return env_pb2.Action(text_data="Submit choice")
 
-                obs_str = observation.text_data.strip('"\'').replace(
-                    '\\n', '\n')
-                obs_arr = _str_grid_to_ndarray(obs_str)
-                action = self._act_dd_eval(obs_arr, available_actions)
+                obs_str = observation.text_data
+                json_start_index = obs_str.find('[')
+
+                if json_start_index != -1:
+                    json_str = obs_str[json_start_index:]
+                    try:
+                        grid_list = json.loads(json_str)
+                        obs_arr = np.array(grid_list)
+                        action = self._act_cd_eval(obs_arr, available_actions)
+                    except json.JSONDecodeError:
+                        logger.warning("Failed to parse JSON from observation for CD task, acting randomly.")
+                        action = self._sample_random_action(available_actions, exclude_reset=True)
+                else:
+                    # No grid found in observation, likely an intro message.
+                    logger.info("No grid found in CD observation, acting randomly.")
+                    action = self._sample_random_action(available_actions, exclude_reset=True)
             elif self.task_name == 'planning':
-                data_dict = json.loads(observation.text_data)
-                goal, mask, render = data_dict["goal"],\
-                                data_dict["mask"], data_dict["render"]
-                goal, mask, render = np.array(goal), np.array(mask), \
-                                        _str_grid_to_ndarray(render)
-                action = self._act_planning_eval(goal, mask, render, 
-                                                 available_actions)
+                obs_str = observation.text_data
+                json_start_index = obs_str.find('{')
+                if json_start_index != -1:
+                    json_str = obs_str[json_start_index:]
+                    data_dict = json.loads(json_str)
+                    goal, mask, render = data_dict["goal"], data_dict["highlight_mask"], data_dict["render"]
+                    goal, mask, render = np.array(goal), np.array(mask), np.array(render)
+                    action = self._act_planning_eval(goal, mask, render, available_actions)
             else:
                 logger.warning(
                     f"Unknown task '{self.task_name}' for evaluation phase. Acting randomly."
@@ -257,20 +315,20 @@ class SimpleWMAgent:
         raise NotImplementedError
 
     @abstractmethod
-    def _check_for_defect(self, next_obs: Observation, 
+    def _check_for_change(self, next_obs: Observation, 
                           action_history: List[Action],
                           num_samples: int = 10) -> bool:
         """**Placeholder**: Checks if the current observation indicates a defect."""
         raise NotImplementedError
 
-    def _make_mcq_choice(self, sampled_trajectories: List[Observation],
+    def _make_mfp_choice(self, sampled_trajectories: List[Observation],
                          observations: Observation,
                          choices: List[Observation]) -> int:
         num_matching = [0] * len(choices)
-        masked_area = observations == 'transparent'
+        masked_area = observations == 'mask'
         for sampled_obs in sampled_trajectories:
             for i, choice_content in enumerate(choices):
-                match = sampled_obs[masked_area] == choice_content.flatten()
+                match = sampled_obs[masked_area].flatten() == choice_content.flatten()
                 if match.all():
                     num_matching[i] += 1
         return np.argmax(num_matching)
@@ -280,7 +338,7 @@ class SimpleWMAgent:
         return sampled_trajectory == real_observations
 
     def _are_obs_content_equal(self, obs_object, choice_content):
-        """**Placeholder**: Compares a final state with an MCQ choice."""
+        """**Placeholder**: Compares a final state with an MFP choice."""
         return False
 
 
@@ -298,15 +356,7 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
         task = config.get("task_name")
         self.experiment_seed = int(config.get("seed"))
         random.seed(self.experiment_seed)
-        if str(config.get("use_oracle_interpreter_seed")).lower() == 'true':
-            if task == "mcq":
-                self.interpreter_seed = yaml.safe_load(
-                open(f"{data_dir}/tasks/{env_name}_next_frame_prediction.yaml")
-                )["seed"]
-            else:
-                self.interpreter_seed = int(config.get("seed"))
-        else:
-            self.interpreter_seed = None
+        self.interpreter_seed = config.get("oracle_seed") if config.get("oracle_seed") else None
         logger.debug(f"Interpreter seed: {self.interpreter_seed}")
         self.colors: Dict[int, str] = load_yaml_to_dict(
             f"{data_dir}/color_dict.yaml")
@@ -320,7 +370,7 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
     def _simulate_from_start_given_actions(self, actions: List[Action], 
                     interpreter_seed: Optional[int] = None,
                     reference_observations: Optional[List[Observation]] = None,
-                    num_of_retries: int = 1,
+                    num_of_retries: int = 10000,
                     log_actions: bool = True
                     ) -> List[Observation]:
         """Simulates a trajectory using the world model given a list of actions.
@@ -339,10 +389,33 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
             matching_reference_obs = True
             self.wm = Interpreter()
             self.wm.run_script(self.prog, autumnstdlib, "", interpreter_seed)
-            # To deal with: https://github.com/BasisResearch/AutumnBenchmark/issues/7
-            obs_json = self.wm.render_all()
 
             sampled_observations = []
+            # add initial observation
+            obs_json = self.wm.render_all()
+            if isinstance(obs_json, str):
+                try:
+                    obs_json = json.loads(obs_json)
+                except:
+                    print(f"Warning: Could not parse observation JSON: "
+                        f"{obs_json}"
+                    )
+                    continue
+            
+            # Use the same function as NFPEnvironment for consistency
+            background_color = self.colors.get(self.wm.get_background(), 1) if hasattr(self.wm, 'get_background') else 1
+            obs_grid = convert_to_grid(obs_json, background_color=background_color, color_dict=self.colors_str_to_int, grid_size=obs_json.get("GRID_SIZE", 16))
+            # Convert to strings using the same color dictionary as NFPEnvironment
+            obs_grid = [[self.colors.get(color, "black") for color in row] for row in obs_grid]
+
+            obs_arr = np.array(obs_grid, dtype=str)
+            
+            # check if it is consistent with the reference observations
+            if reference_observations:
+                if not np.array_equal(obs_arr, reference_observations[0]):
+                    continue
+            sampled_observations.append(obs_arr)
+
             for i, action in enumerate(actions):
                 # Get the next observation from the world model
                 if log_actions:
@@ -356,7 +429,7 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
                     self.wm.up()
                 elif action == "down":
                     self.wm.down()
-                elif action in ["noop", "NOP"]:
+                elif action == "noop":
                     pass
                 elif "click" in action:
                     _, x, y = action.split()
@@ -378,20 +451,11 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
                             f"{obs_json}"
                         )
                         continue
-                grid_size = obs_json.get("GRID_SIZE", 16)
-                if hasattr(self.wm, 'get_background') and \
-                    self.wm.get_background() in self.colors_str_to_int:
-                    # Use the background color from the interpreter if available
-                    background_color = self.colors_str_to_int[
-                        self.wm.get_background()]
-                else:
-                    # Default background color if not in colors
-                    background_color = 1
-                obs_grid = convert_to_grid(obs_json,
-                                            background_color,
-                                            self.colors_str_to_int,
-                                            grid_size,
-                                            use_color_str=True)
+                
+                background_color = self.colors.get(self.wm.get_background(), 1) if hasattr(self.wm, 'get_background') else 1
+                obs_grid = convert_to_grid(obs_json, background_color=background_color, color_dict=self.colors_str_to_int, grid_size=obs_json.get("GRID_SIZE", 16))
+                obs_grid = [[self.colors.get(color, "black") for color in row] for row in obs_grid]
+
                 obs_arr = np.array(obs_grid, dtype=str)
                 sampled_observations.append(obs_arr)
 
@@ -399,7 +463,7 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
                     # If we have reference observations, check if the current
                     # observation matches the reference one
                     target_obs = reference_observations[i + 1]
-                    mask = target_obs != 'transparent'
+                    mask = target_obs != 'mask'
                     if not np.array_equal(obs_arr[mask], target_obs[mask]):
                         logging.info(
                             f"Observation {i+1} does not match reference. "
@@ -424,11 +488,15 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
         state if it matches the real observations.
         This method will keep trying until it finds a consistent trajectory.
         """
-        return self._simulate_from_start_given_actions(
+        result = self._simulate_from_start_given_actions(
             actions, interpreter_seed=self.interpreter_seed,
-            reference_observations=observations)[-1]
+            reference_observations=observations)
 
-    def _check_for_defect(self, next_obs: Observation, 
+        if not result:
+            return None
+        return result[-1]
+
+    def _check_for_change(self, next_obs: Observation, 
                           action_history: List[Action],
                           num_samples: int = 1) -> bool:
         """Checks if the current observation indicates a defect.
@@ -482,7 +550,8 @@ class OracleAutumnSynthAgent(SimpleWMAgent):
         # ---------- build the discrete action set we are willing to search -----
         all_actions = self._expand_actions(available_actions,
                                         exclude_quit=True,
-                                        exclude_submit=True)
+                                        exclude_submit=True,
+                                        exclude_reset=True)
 
         # ---------- find a new plan (open‑loop) --------------------------------
         all_action_strs = [a.text_data for a in all_actions]
@@ -604,7 +673,7 @@ class SimpleWMAgentServicer(agent_grpc.MARAAgentServicer):
             request.reactive_action_space.available_actions)
         if not available_actions:
             return agent_pb2.ActResponse(action=env_pb2.Action(
-                text_data="NOP"))
+                text_data="noop"))
         action = self.agent.act(request.observation, available_actions)
         logger.info(f"SimpleWMAgent action: {action.text_data}")
         return agent_pb2.ActResponse(action=action)
@@ -625,6 +694,8 @@ def _str_grid_to_ndarray(grid_txt: str) -> np.ndarray:
     Helper: turn the whitespace-separated, newline-delimited grid text
     into a 2-D NumPy array of dtype=str.
     """
+    if "frame: " in grid_txt:
+        grid_txt = grid_txt.split("frame: \"")[1]
     rows: List[List[str]] = [
         row.split() for row in grid_txt.strip().splitlines()
     ]
@@ -651,15 +722,22 @@ def parse_text_obs_to_dict(obs_text: str) -> Dict[str, Any]:
         - "options" converted to List[np.ndarray[str]] if present.
           (Original "render" key is removed.)
     """
-    obs: Dict[str, Union[str, int, bool, List[str]]] = json.loads(obs_text)
+    # obs_text is a string like: 
+    # ... some text ...
+    # {"video_location": ..., "render": "...", "action_took": "...", is_finished: ...}
+    obs_text = f"{{{obs_text.split('{')[1].split('}')[0]}}}"
+    try:
+        obs: Dict[str, Union[str, int, bool, List[str]]] = json.loads(obs_text)
+    except:
+        breakpoint()
 
     # Convert main render block → ndarray and store under "state"
     render_txt = obs.pop("render", None)
     if render_txt is not None:
-        obs["obs_state"] = _str_grid_to_ndarray(render_txt)
+        obs["obs_state"] = np.array(render_txt)
 
     # If multiple option boards are supplied, convert each as well
-    if "options" in obs and isinstance(obs["options"], list):
-        obs["options"] = [_str_grid_to_ndarray(opt) for opt in obs["options"]]
+    if "choices" in obs and isinstance(obs["choices"], list):
+        obs["choices"] = [np.array(opt) for opt in obs["choices"]]
 
     return obs

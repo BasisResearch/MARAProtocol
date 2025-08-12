@@ -1,12 +1,12 @@
-brew install protobuf@3
+brew install protobuf
 if [ -f "${HOME}/.zshrc" ]; then
-    echo 'export PATH="/opt/homebrew/opt/protobuf@3/bin:$PATH"' >> ~/.zshrc
+    echo 'export PATH="/opt/homebrew/opt/protobuf/bin:$PATH"' >> ~/.zshrc
 elif [ -f "${HOME}/.bashrc" ]; then
-    echo 'export PATH="/opt/homebrew/opt/protobuf@3/bin:$PATH"' >> ~/.bashrc
+    echo 'export PATH="/opt/homebrew/opt/protobuf/bin:$PATH"' >> ~/.bashrc
 else
     echo "No .zshrc or .bashrc file found in home directory."
     echo "Please create one of these files and add the following line:"
-    echo "export PATH=/opt/homebrew/opt/protobuf@3/bin:\$PATH"
+    echo "export PATH=/opt/homebrew/opt/protobuf/bin:\$PATH"
     echo "Then run the script again."
     exit 1
 fi

@@ -15,11 +15,11 @@ from .evaluation_controller import EvaluationController
 
 def get_environment_ids():
     """
-    Get list of environment names based on the `mcqs` folder, considering all the json files.
+    Get list of environment names based on the `mfps` folder, considering all the json files.
     """
     logging.info(os.getcwd())
     environment_ids = []
-    for file in os.listdir("./python_examples/autumnbench/mcqs"):
+    for file in os.listdir("./python_examples/autumnbench/mfps"):
         if file.endswith(".json"):
             environment_ids.append(file.split(".")[0])
     return environment_ids
@@ -59,7 +59,7 @@ def run_multi_environment_evaluation():
         try:
             controller = EvaluationController()
             logging.info(
-                "Initializing controller with Autumn Defect Detection environment"
+                "Initializing controller with Autumn Change Detection environment"
             )
             init_response = controller.initialize(
                 controller_pb2.ControllerInitializeRequest(

@@ -1,5 +1,5 @@
 {
-  "type": "mask_frame_prediction",
+  "type": "masked_frame_prediction",
   "program": "ice",
   "observations": [
     {

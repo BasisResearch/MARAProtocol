@@ -9,7 +9,7 @@ import time
 from generated.mara import mara_environment_pb2 as env_pb2
 from generated.mara import mara_environment_service_pb2 as env_service_pb2
 from generated.mara import mara_environment_service_pb2_grpc as env_grpc
-from .concrete_envs import InteractiveEnvironment, DefectDetectionEnvironment, DDSliderEnvironment, ActionPredictionEnvironment
+from .concrete_envs import InteractiveEnvironment, ChangeDetectionEnvironment, CDSliderEnvironment, PlanningEnvironment
 import os
 # Setup logging to a file
 logging.basicConfig(level=logging.INFO, filename="log_environment_interfaces.txt")
@@ -30,7 +30,7 @@ class MARAInteractiveServicer(env_grpc.MARAEnvironmentServicer):
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
         self.environment = InteractiveEnvironment(
             request.config["env_name"], 
-            stack_frames=int(request.config["stack_frames"]), 
+            stack_frames=request.config["stack_frames"].lower() == "true", 
             skip_frames=request.config["skip_frames"].lower() == "true",
             render_mode=request.config["render_mode"],
             logging_path=request.config["logging_path"],
@@ -83,6 +83,7 @@ class MARAInteractiveServicer(env_grpc.MARAEnvironmentServicer):
         if not self.environment:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Environment not initialized")
         
+        observation, reward, is_terminal, info = None, 0, False, {}
         try:
             observation, reward, is_terminal, info = self.environment.step(request.action)
         except Exception as e:
@@ -133,13 +134,13 @@ class MARAInteractiveServicer(env_grpc.MARAEnvironmentServicer):
         )
 
 
-class MARADefectDetectionServicer(MARAInteractiveServicer):
+class MARAChangeDetectionServicer(MARAInteractiveServicer):
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
-        self.environment = DefectDetectionEnvironment(request.config["env_name"])
+        self.environment = ChangeDetectionEnvironment(request.config["env_name"])
         
         response = env_service_pb2.InitializeResponse(
             success=True,
-            message=f"Defect Detection Environment initialized: {request.config['env_name']}"
+            message=f"Change Detection Environment initialized: {request.config['env_name']}"
         )
         
         return response
@@ -149,7 +150,7 @@ class MARADefectDetectionServicer(MARAInteractiveServicer):
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Environment not initialized")
         
         response = env_service_pb2.EnvironmentInfoResponse(
-            environment_id=f"{context['env_name']}_v1_dd",
+            environment_id=f"{context['env_name']}_v1_cd",
             version="1.0.0",
             env_type=env_pb2.REACTIVE,
             capabilities={"text_input": "true", "text_output": "true"},
@@ -157,18 +158,18 @@ class MARADefectDetectionServicer(MARAInteractiveServicer):
         )
         return response
 
-class MARADefectDetectionSliderServicer(MARADefectDetectionServicer):
+class MARAChangeDetectionSliderServicer(MARAChangeDetectionServicer):
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
-        self.environment = DDSliderEnvironment(request.config["env_name"],
+        self.environment = CDSliderEnvironment(request.config["env_name"],
                                                render_mode=request.config["render_mode"],
                                                logging_path=request.config["logging_path"],
-                                               stack_frames=int(request.config["stack_frames"]),
+                                               stack_frames=request.config["stack_frames"].lower() == "true",
                                                skip_frames=request.config["skip_frames"].lower() == "true",
                                                seed=int(request.config["seed"]),
                                                data_dir=request.config["data_dir"])
         response = env_service_pb2.InitializeResponse(
             success=True,
-            message=f"Defect Detection Environment initialized: {request.config['env_name']}"
+            message=f"Change Detection Environment initialized: {request.config['env_name']}"
         )
         
         return response
@@ -178,7 +179,7 @@ class MARADefectDetectionSliderServicer(MARADefectDetectionServicer):
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Environment not initialized")
         
         response = env_service_pb2.EnvironmentInfoResponse(
-            environment_id=f"{context['env_name']}_v1_dd_slider",
+            environment_id=f"{context['env_name']}_v1_cd_slider",
             version="1.0.0",
             env_type=env_pb2.REACTIVE,
             capabilities={"text_input": "true", "text_output": "true"},
@@ -186,62 +187,66 @@ class MARADefectDetectionSliderServicer(MARADefectDetectionServicer):
         )
         return response
 
-class MARAActionPredictionServicer(MARAInteractiveServicer):
+class MARAPlanningServicer(MARAInteractiveServicer):
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
-        self.environment = ActionPredictionEnvironment(request.config["env_name"],
+        self.environment = PlanningEnvironment(request.config["env_name"],
                                                       render_mode=request.config["render_mode"],
                                                       logging_path=request.config["logging_path"],
-                                                      stack_frames=int(request.config["stack_frames"]),
+                                                      stack_frames=request.config["stack_frames"].lower() == "true",
                                                       skip_frames=request.config["skip_frames"].lower() == "true",
                                                       seed=int(request.config["seed"]),
                                                       data_dir=request.config["data_dir"])
         response = env_service_pb2.InitializeResponse(
             success=True,
-            message=f"Action Prediction Environment initialized: {request.config['env_name']}"
+            message=f"Planning Environment initialized: {request.config['env_name']}"
         )
         
         return response
 
     def GetEnvironmentInfo(self, request, context):
         return env_service_pb2.EnvironmentInfoResponse(
-            environment_id=f"{self.environment.env_name}_v1_action_prediction",
+            environment_id=f"{self.environment.env_name}_v1_planning",
             version="1.0.0",
             env_type=env_pb2.REACTIVE,
             capabilities={"text_input": "true", "text_output": "true"},
             metadata={"genre": "adventure", "difficulty": "beginner"}
         )
 
-class MARACompositeAutumnDefectDetectionServicer(env_grpc.MARAEnvironmentServicer):
+class MARACompositeAutumnChangeDetectionServicer(env_grpc.MARAEnvironmentServicer):
     def __init__(self):
         self.interactive_environment = MARAInteractiveServicer()
-        self.defect_detection_environment = MARADefectDetectionSliderServicer()
+        self.change_detection_environment = MARAChangeDetectionSliderServicer()
         self.current_environment = self.interactive_environment
         self.env_name = None
-        self.transiting = "Interactive" # InteractiveReset-> Interactive -> Transit -> DefectReset -> Defect -> End.
+        self.transiting = "Interactive" # InteractiveReset-> Interactive -> Transit -> ChangeReset -> Change -> End.
 
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
         self.env_name = request.config["env_name"]
-        self.per_env_max_steps = int(request.config["per_env_max_steps"])
+        self.max_interaction_steps = int(request.config["max_interaction_steps"])
         self.seed = request.config["seed"]
         self.data_dir = request.config["data_dir"]
         self.render_mode = request.config["render_mode"]
         self.logging_path = request.config["logging_path"]
+        self.current_environment = self.interactive_environment
         return self.current_environment.Initialize(request, context)
 
     def QuerySpaces(self, request, context):
         if self.transiting == "Interactive":
             return self.current_environment.QuerySpaces(request, context)
-        elif self.transiting == "Transition" or self.transiting == "DefectReset":
+        elif self.transiting == "Transition" or self.transiting == "ChangeReset":
+            actions = self.interactive_environment.environment.get_action_space()
+            # remove the go-to-test action
+            actions = [action for action in actions if action.text_data != "go-to-test"]
             response = env_service_pb2.SpaceQueryResponse(
                 reactive_response=env_pb2.ReactiveEnvironment.ActionSpaceResponse(
                     action_space=env_pb2.ReactiveEnvironment.ActionSpace(
-                        available_actions=[env_pb2.Action(text_data="NOP")]
+                        available_actions=actions
                     )
                 )
             )
             return response
-        elif self.transiting == "Defect":
-            return self.defect_detection_environment.QuerySpaces(request, context)
+        elif self.transiting == "Change":
+            return self.change_detection_environment.QuerySpaces(request, context)
         else:
             raise ValueError(f"Invalid transiting state: {self.transiting}")
 
@@ -260,36 +265,36 @@ class MARACompositeAutumnDefectDetectionServicer(env_grpc.MARAEnvironmentService
             if is_terminal:
                 self.transiting = "Transition"
                 step_response.is_terminal = False
-            elif self.steps >= self.per_env_max_steps:
+            elif self.steps >= self.max_interaction_steps:
                 self.transiting = "Transition"
                 step_response.is_terminal = False
                 self.steps = 0
+            
+            if self.transiting == "Transition":
+                self.steps = 0
+                # Send initialize and reset to the new environment
+                self.current_environment = self.change_detection_environment
+                init_req = env_service_pb2.InitializeRequest(
+                    config={"env_name": self.env_name, "seed": self.seed, "data_dir": self.data_dir, "render_mode": self.render_mode, "logging_path": self.logging_path, "stack_frames": "false", "skip_frames": "false"}
+                )
+                self.change_detection_environment.Initialize(init_req, context)
+                reset_req = env_service_pb2.ResetRequest()
+                reset_response = self.change_detection_environment.Reset(reset_req, context)
+                observation = reset_response.initial_observation
+                self.transiting = "Change"
+                return env_service_pb2.StepResponse(observation=observation, reward=0, is_terminal=False, info={})
+
             return step_response
-        elif self.transiting == "Transition":
-            self.transiting = "DefectReset"
-            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Interactive environment ended, you will now transit to the defect detection environment."), reward=0, is_terminal=False, info={})
-        elif self.transiting == "DefectReset":
-            self.steps = 0
-            # Send initialize and reset to the new environment
-            self.current_environment = self.defect_detection_environment
-            init_req = env_service_pb2.InitializeRequest(
-                config={"env_name": self.env_name, "seed": self.seed, "data_dir": self.data_dir, "render_mode": self.render_mode, "logging_path": self.logging_path, "stack_frames": "1", "skip_frames": "false"}
-            )
-            self.defect_detection_environment.Initialize(init_req, context)
-            reset_req = env_service_pb2.ResetRequest()
-            self.defect_detection_environment.Reset(reset_req, context)
-            observation = self.defect_detection_environment.environment.get_observation()
-            self.transiting = "Defect"
-            return env_service_pb2.StepResponse(observation=observation, reward=0, is_terminal=False, info={})
-        elif self.transiting == "Defect":
-            step_response = self.defect_detection_environment.Step(request, context)
+        elif self.transiting == "Change":
+            step_response = self.change_detection_environment.Step(request, context)
             observation, reward, is_terminal, info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
             if is_terminal:
                 self.transiting = "End"
                 step_response.is_terminal = True
+                step_response.info["terminal_condition"] = "finish"
             return step_response
         elif self.transiting == "End":
-            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Defect detection environment ended."), reward=0, is_terminal=True, info={})
+            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Change detection environment ended."), reward=0, is_terminal=True, info={"terminal_condition": "finish"})
         else:
             raise ValueError(f"Invalid transiting state: {self.transiting}")
 
@@ -299,37 +304,41 @@ class MARACompositeAutumnDefectDetectionServicer(env_grpc.MARAEnvironmentService
             message="Environment closed successfully"
         )
 
-class MARACompositeAutumnActionPredictionServicer(env_grpc.MARAEnvironmentServicer):
+class MARACompositeAutumnPlanningServicer(env_grpc.MARAEnvironmentServicer):
     def __init__(self):
         self.interactive_environment = MARAInteractiveServicer()
-        self.action_prediction_environment = MARAActionPredictionServicer()
+        self.planning_environment = MARAPlanningServicer()
         self.current_environment = self.interactive_environment
         self.env_name = None
-        self.transiting = "Interactive" # InteractiveReset-> Interactive -> Transit -> ActionPredictionReset -> ActionPrediction -> End.
+        self.transiting = "Interactive" # InteractiveReset-> Interactive -> Transit -> PlanningReset -> Planning -> End.
 
     def Initialize(self, request: env_service_pb2.InitializeRequest, context):
         self.env_name = request.config["env_name"]
-        self.per_env_max_steps = int(request.config["per_env_max_steps"])
+        self.max_interaction_steps = int(request.config["max_interaction_steps"])
         self.seed = request.config["seed"]
         self.data_dir = request.config["data_dir"]
         self.render_mode = request.config["render_mode"]
         self.logging_path = request.config["logging_path"]
+        self.current_environment = self.interactive_environment
         return self.current_environment.Initialize(request, context)
 
     def QuerySpaces(self, request, context):
         if self.transiting == "Interactive":
             return self.current_environment.QuerySpaces(request, context)
-        elif self.transiting == "Transition" or self.transiting == "ActionPredictionReset":
+        elif self.transiting == "Transition" or self.transiting == "PlanningReset":
+            actions = self.interactive_environment.environment.get_action_space()
+            # remove the go-to-test action
+            actions = [action for action in actions if action.text_data != "go-to-test"]
             response = env_service_pb2.SpaceQueryResponse(
                 reactive_response=env_pb2.ReactiveEnvironment.ActionSpaceResponse(
                     action_space=env_pb2.ReactiveEnvironment.ActionSpace(
-                        available_actions=[env_pb2.Action(text_data="NOP")]
+                        available_actions=actions
                     )
                 )
             )
             return response
-        elif self.transiting == "ActionPrediction":
-            return self.action_prediction_environment.QuerySpaces(request, context)
+        elif self.transiting == "Planning":
+            return self.planning_environment.QuerySpaces(request, context)
         else:
             raise ValueError(f"Invalid transiting state: {self.transiting}")
 
@@ -348,42 +357,41 @@ class MARACompositeAutumnActionPredictionServicer(env_grpc.MARAEnvironmentServic
             if is_terminal:
                 self.transiting = "Transition"
                 step_response.is_terminal = False
-            elif self.steps >= self.per_env_max_steps:
+            elif self.steps >= self.max_interaction_steps:
                 self.transiting = "Transition"
                 step_response.is_terminal = False
                 self.steps = 0
+            
+            if self.transiting == "Transition":
+                self.transiting = "PlanningReset"
+                self.steps = 0
+                # Send initialize and reset to the new environment
+                self.current_environment = self.planning_environment
+                init_req = env_service_pb2.InitializeRequest(
+                    config={"env_name": self.env_name, "seed": self.seed, "data_dir": self.data_dir, "render_mode": self.render_mode, "logging_path": self.logging_path, "stack_frames": "false", "skip_frames": "false"}
+                )
+                self.planning_environment.Initialize(init_req, context)
+                reset_req = env_service_pb2.ResetRequest()
+                reset_response = self.planning_environment.Reset(reset_req, context)
+                observation = reset_response.initial_observation
+                self.transiting = "Planning"
+                return env_service_pb2.StepResponse(observation=observation, reward=0, is_terminal=False, info={})
             return step_response
-        elif self.transiting == "Transition":
-            self.transiting = "ActionPredictionReset"
-            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Interactive environment ended, you will now transit to the action prediction environment."), reward=0, is_terminal=False, info={})
-        elif self.transiting == "ActionPredictionReset":
-            self.steps = 0
-            # Send initialize and reset to the new environment
-            self.current_environment = self.action_prediction_environment
-            init_req = env_service_pb2.InitializeRequest(
-                config={"env_name": self.env_name, "seed": self.seed, "data_dir": self.data_dir, "render_mode": self.render_mode, "logging_path": self.logging_path, "stack_frames": "1", "skip_frames": "false"}
-            )
-            self.action_prediction_environment.Initialize(init_req, context)
-            reset_req = env_service_pb2.ResetRequest()
-            self.action_prediction_environment.Reset(reset_req, context)
-            observation = self.action_prediction_environment.environment.get_observation()
-            self.transiting = "ActionPrediction"
-            return env_service_pb2.StepResponse(observation=observation, reward=0, is_terminal=False, info={})
-        elif self.transiting == "ActionPrediction":
-            step_response = self.action_prediction_environment.Step(request, context)
+        elif self.transiting == "Planning":
+            step_response = self.planning_environment.Step(request, context)
             observation, reward, is_terminal, info = step_response.observation, step_response.reward, step_response.is_terminal, step_response.info
             if is_terminal:
                 self.transiting = "End"
                 step_response.is_terminal = True
             # Commenting out to allow the max_steps during evaluation to be 
             # handled by the evaluation_controller run_environment
-            # elif self.steps >= self.per_env_max_steps:
+            # elif self.steps >= self.max_interaction_steps:
             #     self.transiting = "End"
             #     step_response.is_terminal = True
             #     self.steps = 0
             return step_response
         elif self.transiting == "End":
-            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Action prediction environment ended."), reward=0, is_terminal=True, info={})
+            return env_service_pb2.StepResponse(observation=env_pb2.Observation(text_data="Planning environment ended."), reward=0, is_terminal=True, info={})
         else:
             raise ValueError(f"Invalid transiting state: {self.transiting}")
 
@@ -405,15 +413,15 @@ def serve():
     server.start()
     print(f"Autumn Interactive Environment server started on port {port}")
 
-    server_defect_detection = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    server_change_detection = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     env_grpc.add_MARAEnvironmentServicer_to_server(
-        MARADefectDetectionServicer(), server_defect_detection
+        MARAChangeDetectionServicer(), server_change_detection
     )
 
     port = 50052
-    server_defect_detection.add_insecure_port(f'[::]:{port}')
-    server_defect_detection.start()
-    print(f"Autumn Defect Detection Environment server started on port {port}")
+    server_change_detection.add_insecure_port(f'[::]:{port}')
+    server_change_detection.start()
+    print(f"Autumn Change Detection Environment server started on port {port}")
     
     try:
         while True:

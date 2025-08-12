@@ -18,21 +18,25 @@ def get_environment_ids(data_dir: str, task_name: str):
     Get list of environment names based on the `prompts` folder, considering all the json files.
     """
     logging.info(os.getcwd())
+    prompts_dir = os.path.join(data_dir, "prompts")
+    if not os.path.isdir(prompts_dir):
+        logging.warning(f"Prompts directory not found at {prompts_dir}. Returning empty list of environments.")
+        return []
+
     environment_ids = []
-    for file in os.listdir(f"{data_dir}/prompts/"):
+    for file in os.listdir(prompts_dir):
         if file.endswith(f"{task_name}.json"):
-            with open(f"{data_dir}/prompts/{file}", "r") as f:
+            with open(os.path.join(prompts_dir, file), "r") as f:
                 data = json.load(f)
                 task_type = data["type"]
-                match task_type:
-                    case "mask_frame_prediction":
-                        environment_ids.append(f"{data['program']}_mfp")
-                    case "defect_detection":
-                        environment_ids.append(f"{data['program']}_dd")
-                    case "planning":
-                        environment_ids.append(f"{data['program']}_planning")
-                    case _:
-                        raise ValueError(f"Unknown task type: {task_type}")
+                if task_type == "masked_frame_prediction":
+                    environment_ids.append(f"{data['program']}_mfp")
+                elif task_type == "change_detection":
+                    environment_ids.append(f"{data['program']}_cd")
+                elif task_type == "planning":
+                    environment_ids.append(f"{data['program']}_planning")
+                else:
+                    raise ValueError(f"Unknown task type: {task_type}")
     logging.info(f"Environment IDs: {environment_ids}") 
     environment_ids = list(set(environment_ids))
     return environment_ids
@@ -47,8 +51,12 @@ def run_multi_environment_evaluation(cfg: DictConfig):
     logging.info(f"Running evaluation for {cfg} config")
     # Connect to evaluation controller
     logging.info("Initializing controller with Autumn environments")
-    environment_ids = get_environment_ids(cfg.data_dir, cfg.task_name) if not cfg.envs else cfg.envs
-    logging.info(f"Running evaluation for {environment_ids}")
+    environment_ids = cfg.envs
+    if not environment_ids:
+        environment_ids = get_environment_ids(cfg.data_dir, cfg.task_name)
+    if not environment_ids:
+        logging.error("No environments specified or found. Aborting evaluation.")
+        return
 
     evaluation_controller = EvaluationControllerNoServer()
     init_success, init_message = evaluation_controller.initialize(
@@ -63,15 +71,14 @@ def run_multi_environment_evaluation(cfg: DictConfig):
             "max_history_length": cfg.max_history_length,
             "stack_frames": cfg.stack_frames,
             "skip_frames": cfg.skip_frames,
-            "per_env_max_steps": cfg.per_env_max_steps,
+            "max_interaction_steps": cfg.max_interaction_steps,
             "render_mode": cfg.render_mode,
             "seed": cfg.seed,
             "data_dir": cfg.data_dir,
             "task_name": cfg.task_name,
             "use_scratchpad": cfg.use_scratchpad,
             "instruction_type": cfg.instruction_type,
-            "hint": cfg.hint,
-            "use_oracle_interpreter_seed": cfg.use_oracle_interpreter_seed,
+            "hint": cfg.hint
         }
     )
 
@@ -87,11 +94,23 @@ def run_multi_environment_evaluation(cfg: DictConfig):
     # Print results
     logging.info("Evaluation complete, printing results")
     print("\n=== Evaluation Results ===")
-    print(f"Status: {run_response["message"]}")
-    print(f"Aggregate Reward: {run_response["aggregate_reward"]}")
+    print(f"Status: {run_response['message']}")
+    print(f"Aggregate Reward: {run_response['aggregate_reward']}")
     print("\nEnvironment Rewards:")
     # Convert gRPC map to a standard dict for easier processing/serialization
-    env_rewards_dict = {env_id: reward for env_id, reward in run_response["environment_rewards"].items()}
+    env_rewards_dict = {env_id: data for env_id, data in run_response["environment_rewards"].items()}
+    
+    data = []
+    for env_id, env_data in env_rewards_dict.items():
+        data.append({
+            'Environment': env_id,
+            'Reward': env_data['reward'],
+            'Num of Steps (Interaction)': env_data.get('interaction_steps', 0),
+            'Num of Steps (Test)': env_data.get('test_steps', 0),
+            'Num of Resets in Interaction': env_data.get('interaction_resets', 0)
+        })
+
+    df = pd.DataFrame(data)
     for env_id, reward in env_rewards_dict.items():
         print(f"  {env_id}: {reward}")
     
@@ -99,11 +118,13 @@ def run_multi_environment_evaluation(cfg: DictConfig):
     for i, env_id in enumerate(run_response["environments_visited"]):
         print(f"  {i+1}. {env_id}")
     
-    print(f"\nEvaluation Complete: {run_response["evaluation_complete"]}")
+    print(f"\nEvaluation Complete: {run_response['evaluation_complete']}")
 
     # Write environment rewards dict results to CSV
-    df = pd.DataFrame(env_rewards_dict.items(), columns=['Environment', 'Reward'])
-    df.to_csv(output_csv_path, index=False)
+    if not df.empty:
+        df.to_csv(output_csv_path, index=False)
+    else:
+        logging.warning("No results to write to CSV.")
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
