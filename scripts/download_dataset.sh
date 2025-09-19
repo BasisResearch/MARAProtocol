@@ -136,6 +136,70 @@ jq -c '.files[]' "${LOCAL_MANIFEST_PATH}" | while read -r file_obj; do
             fi
         fi
     fi
+
+    # Post-process: create program-based filenames by moving from id-based files
+    alt_prompt_cd="${LOCAL_DESTINATION}/prompts/${program_id}_cd.json"
+    prompt_path_for_type="${local_prompt_path}"
+    if [[ ! -f "${prompt_path_for_type}" && -f "${alt_prompt_cd}" ]]; then
+        prompt_path_for_type="${alt_prompt_cd}"
+    fi
+    if [[ -f "${prompt_path_for_type}" ]]; then
+        task_type=$(jq -r '.type' "${prompt_path_for_type}")
+        case "${task_type}" in
+            "change_detection")
+                # determine wrong_program_id BEFORE moving prompt
+                src_prompt="${LOCAL_DESTINATION}/prompts/${task_id}.json"
+                dst_prompt="${LOCAL_DESTINATION}/prompts/${program_id}_cd.json"
+                wrong_program_id=""
+                if [[ -f "${src_prompt}" ]]; then
+                    wrong_program_id=$(jq -r '.wrong_program // empty' "${src_prompt}")
+                elif [[ -f "${dst_prompt}" ]]; then
+                    wrong_program_id=$(jq -r '.wrong_program // empty' "${dst_prompt}")
+                fi
+
+                # prompts: id -> program-based cd
+                if [[ -f "${src_prompt}" && ! -f "${dst_prompt}" ]]; then
+                    mv "${src_prompt}" "${dst_prompt}"
+                fi
+                # answers: id -> program-based
+                src_ans="${LOCAL_DESTINATION}/answers/${task_id}.json"
+                dst_ans="${LOCAL_DESTINATION}/answers/${program_id}_change_detection.json"
+                if [[ -f "${src_ans}" && ! -f "${dst_ans}" ]]; then
+                    mv "${src_ans}" "${dst_ans}"
+                fi
+
+                # wrong program: wrong_program_id -> program-based alias
+                if [[ -n "${wrong_program_id}" ]]; then
+                    src_wrong="${LOCAL_DESTINATION}/programs/${wrong_program_id}.sexp"
+                    dst_wrong="${LOCAL_DESTINATION}/programs/${program_id}_change_detection_wrong_program.sexp"
+                    if [[ -f "${src_wrong}" && ! -f "${dst_wrong}" ]]; then
+                        mv "${src_wrong}" "${dst_wrong}"
+                    fi
+                fi
+                ;;
+            "masked_frame_prediction")
+                # prompts/answers: id -> program-based mfp
+                src_prompt="${LOCAL_DESTINATION}/prompts/${task_id}.json"
+                dst_prompt="${LOCAL_DESTINATION}/prompts/${program_id}_mfp.json"
+                if [[ -f "${src_prompt}" && ! -f "${dst_prompt}" ]]; then
+                    mv "${src_prompt}" "${dst_prompt}"
+                fi
+                src_ans="${LOCAL_DESTINATION}/answers/${task_id}.json"
+                dst_ans="${LOCAL_DESTINATION}/answers/${program_id}_mfp.json"
+                if [[ -f "${src_ans}" && ! -f "${dst_ans}" ]]; then
+                    mv "${src_ans}" "${dst_ans}"
+                fi
+                ;;
+            "planning")
+                # prompts: id -> program-based planning
+                src_prompt="${LOCAL_DESTINATION}/prompts/${task_id}.json"
+                dst_prompt="${LOCAL_DESTINATION}/prompts/${program_id}_planning.json"
+                if [[ -f "${src_prompt}" && ! -f "${dst_prompt}" ]]; then
+                    mv "${src_prompt}" "${dst_prompt}"
+                fi
+                ;;
+        esac
+    fi
 done
 
 
