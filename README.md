@@ -111,3 +111,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 # Contributors
 Dat Nguyen, Moksh Jain, Yichao Liang, Archana Warrier, Michelangelo Naim, Cambridge Yang, Zenna Tavares
+
+**Open source contributors**: @hellohawaii
