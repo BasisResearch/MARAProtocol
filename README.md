@@ -67,7 +67,7 @@ To download the public dataset, run the following script from the root of the re
 ```
 
 This script requires the following tools to be installed:
-- **Google Cloud SDK**: The script uses `gsutil` to download files from Google Cloud Storage. You can find installation instructions [here](https://cloud.google.com/sdk/docs/install).
+- **curl**: The script uses `curl` to download files via HTTPS. It is pre-installed on most modern operating systems (like macOS and popular Linux distributions).
 - **jq**: A lightweight and flexible command-line JSON processor. You can install it with `brew install jq` on macOS or find other installation methods [here](https://stedolan.github.io/jq/download/).
 
 After the script finishes, the dataset will be available in the `python_examples/autumnbench/example_benchmark/` directory.

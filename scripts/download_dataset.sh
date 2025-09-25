@@ -4,10 +4,10 @@
 # It first downloads a manifest file and then downloads the files listed in the manifest.
 #
 # Prerequisites:
-# 1. Google Cloud SDK installed. This script relies on the `gsutil` command.
-#    Installation instructions: https://cloud.google.com/sdk/docs/install
-# 2. Authenticated with GCP. Run `gcloud auth login` and `gcloud auth application-default login`.
-# 3. `jq` installed (https://stedolan.github.io/jq/download/). On macOS: `brew install jq`.
+# 1. `curl` installed for downloading files.
+# 2. `jq` installed (https://stedolan.github.io/jq/download/).
+#
+# You can run the `scripts/setup.sh` script to install these dependencies.
 #
 # Usage:
 # ./scripts/download_dataset.sh
@@ -32,11 +32,11 @@ MANIFEST_FILE="manifest_public.json"
 
 # --- Script ---
 
-# Check for gsutil
-if ! command -v gsutil &> /dev/null
+# Check for curl
+if ! command -v curl &> /dev/null
 then
-    echo "ERROR: 'gsutil' is not installed or not in your PATH."
-    echo "Please install the Google Cloud SDK to continue: https://cloud.google.com/sdk/docs/install"
+    echo "ERROR: 'curl' is not installed or not in your PATH."
+    echo "Please install curl to continue, or run 'scripts/setup.sh'."
     exit 1
 fi
 
@@ -45,28 +45,34 @@ fi
 if ! command -v jq &> /dev/null
 then
     echo "ERROR: 'jq' is not installed, but is required to parse the manifest file."
-    echo "Please install jq to continue. See https://stedolan.github.io/jq/download/"
+    echo "Please install jq to continue (e.g., 'brew install jq' or 'sudo apt-get install jq'), or run 'scripts/setup.sh'."
     exit 1
 fi
 
-# Construct the base URL for gsutil.
+# Construct the base URL for Firebase Storage HTTPS access.
 # This handles the case where the root path is empty.
 if [[ -z "${DATASET_ROOT_IN_BUCKET}" ]]; then
-    GS_BASE_URL="gs://${GCP_BUCKET}"
+    HTTPS_BASE_URL="https://firebasestorage.googleapis.com/v0/b/${GCP_BUCKET}/o/"
 else
     # gsutil is sensitive to trailing slashes, so remove it if present
     CLEANED_ROOT_PATH=${DATASET_ROOT_IN_BUCKET%/}
-    GS_BASE_URL="gs://${GCP_BUCKET}/${CLEANED_ROOT_PATH}"
+    HTTPS_BASE_URL="https://firebasestorage.googleapis.com/v0/b/${GCP_BUCKET}/o/${CLEANED_ROOT_PATH}%2F"
 fi
 
 # Create destination if it doesn't exist
 mkdir -p "${LOCAL_DESTINATION}"
 
-MANIFEST_SOURCE_URL="${GS_BASE_URL}/${MANIFEST_FILE}"
+MANIFEST_SOURCE_URL="${HTTPS_BASE_URL}${MANIFEST_FILE}?alt=media"
 LOCAL_MANIFEST_PATH="${LOCAL_DESTINATION}/${MANIFEST_FILE}"
 
 echo "Downloading manifest from ${MANIFEST_SOURCE_URL}..."
-gsutil -q cp -n "${MANIFEST_SOURCE_URL}" "${LOCAL_MANIFEST_PATH}"
+# Use curl to download the file. -f fails silently on server errors. -L follows redirects.
+# -n is not directly supported, but we can check if the file exists first.
+if [[ -f "${LOCAL_MANIFEST_PATH}" ]]; then
+    echo "Manifest file already exists. Skipping download."
+else
+    curl -fL "${MANIFEST_SOURCE_URL}" -o "${LOCAL_MANIFEST_PATH}"
+fi
 
 if [[ ! -f "${LOCAL_MANIFEST_PATH}" ]]; then
     echo "ERROR: Manifest file could not be downloaded."
@@ -76,18 +82,29 @@ fi
 echo "Manifest downloaded to ${LOCAL_MANIFEST_PATH}"
 echo "Parsing manifest and downloading files..."
 
-# This function downloads a single file from GCS
+# This function downloads a single file from GCS via HTTPS
 download_file() {
     local relative_path=$1
-    local remote_url="${GS_BASE_URL}/${relative_path}"
+    
+    # URL-encode the relative path, especially the slashes
+    local encoded_relative_path
+    encoded_relative_path=$(echo -n "${relative_path}" | jq -sRr @uri)
+
+    local remote_url="${HTTPS_BASE_URL}${encoded_relative_path}?alt=media"
     local local_path="${LOCAL_DESTINATION}/${relative_path}"
 
     # Create subdirectory if it doesn't exist
     mkdir -p "$(dirname "${local_path}")"
 
+    # Skip download if file exists
+    if [[ -f "${local_path}" ]]; then
+        echo "Skipping existing file: ${local_path}"
+        return
+    fi
+
     echo "Downloading ${remote_url}"
-    # Use -q for quieter output, and add -n to not overwrite existing files
-    gsutil -q cp -n "${remote_url}" "${local_path}"
+    # Use -f to fail on server errors, -L to follow redirects.
+    curl -fL "${remote_url}" -o "${local_path}"
 }
 
 # Read the 'files' array from the manifest
@@ -118,6 +135,70 @@ jq -c '.files[]' "${LOCAL_MANIFEST_PATH}" | while read -r file_obj; do
                  download_file "programs/${wrong_program_id}.sexp"
             fi
         fi
+    fi
+
+    # Post-process: create program-based filenames by moving from id-based files
+    alt_prompt_cd="${LOCAL_DESTINATION}/prompts/${program_id}_cd.json"
+    prompt_path_for_type="${local_prompt_path}"
+    if [[ ! -f "${prompt_path_for_type}" && -f "${alt_prompt_cd}" ]]; then
+        prompt_path_for_type="${alt_prompt_cd}"
+    fi
+    if [[ -f "${prompt_path_for_type}" ]]; then
+        task_type=$(jq -r '.type' "${prompt_path_for_type}")
+        case "${task_type}" in
+            "change_detection")
+                # determine wrong_program_id BEFORE moving prompt
+                src_prompt="${LOCAL_DESTINATION}/prompts/${task_id}.json"
+                dst_prompt="${LOCAL_DESTINATION}/prompts/${program_id}_cd.json"
+                wrong_program_id=""
+                if [[ -f "${src_prompt}" ]]; then
+                    wrong_program_id=$(jq -r '.wrong_program // empty' "${src_prompt}")
+                elif [[ -f "${dst_prompt}" ]]; then
+                    wrong_program_id=$(jq -r '.wrong_program // empty' "${dst_prompt}")
+                fi
+
+                # prompts: id -> program-based cd
+                if [[ -f "${src_prompt}" && ! -f "${dst_prompt}" ]]; then
+                    mv "${src_prompt}" "${dst_prompt}"
+                fi
+                # answers: id -> program-based
+                src_ans="${LOCAL_DESTINATION}/answers/${task_id}.json"
+                dst_ans="${LOCAL_DESTINATION}/answers/${program_id}_change_detection.json"
+                if [[ -f "${src_ans}" && ! -f "${dst_ans}" ]]; then
+                    mv "${src_ans}" "${dst_ans}"
+                fi
+
+                # wrong program: wrong_program_id -> program-based alias
+                if [[ -n "${wrong_program_id}" ]]; then
+                    src_wrong="${LOCAL_DESTINATION}/programs/${wrong_program_id}.sexp"
+                    dst_wrong="${LOCAL_DESTINATION}/programs/${program_id}_change_detection_wrong_program.sexp"
+                    if [[ -f "${src_wrong}" && ! -f "${dst_wrong}" ]]; then
+                        mv "${src_wrong}" "${dst_wrong}"
+                    fi
+                fi
+                ;;
+            "masked_frame_prediction")
+                # prompts/answers: id -> program-based mfp
+                src_prompt="${LOCAL_DESTINATION}/prompts/${task_id}.json"
+                dst_prompt="${LOCAL_DESTINATION}/prompts/${program_id}_mfp.json"
+                if [[ -f "${src_prompt}" && ! -f "${dst_prompt}" ]]; then
+                    mv "${src_prompt}" "${dst_prompt}"
+                fi
+                src_ans="${LOCAL_DESTINATION}/answers/${task_id}.json"
+                dst_ans="${LOCAL_DESTINATION}/answers/${program_id}_mfp.json"
+                if [[ -f "${src_ans}" && ! -f "${dst_ans}" ]]; then
+                    mv "${src_ans}" "${dst_ans}"
+                fi
+                ;;
+            "planning")
+                # prompts: id -> program-based planning
+                src_prompt="${LOCAL_DESTINATION}/prompts/${task_id}.json"
+                dst_prompt="${LOCAL_DESTINATION}/prompts/${program_id}_planning.json"
+                if [[ -f "${src_prompt}" && ! -f "${dst_prompt}" ]]; then
+                    mv "${src_prompt}" "${dst_prompt}"
+                fi
+                ;;
+        esac
     fi
 done
 
