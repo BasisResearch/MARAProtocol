@@ -28,7 +28,9 @@ sh scripts/generate_python.sh     # generates gRPC stubs into ./generated
 ```
 
 ### Obtaining the interpreter
-We have a prebuilt interpreter for Python 3.13 on MacOSX. More prebuilts are available at [Autumn.cpp/Autumn.wasm repository](https://github.com/BasisResearch/Autumn.cpp/releases). For any different versions, please follow the build guide of the repository.
+We have a prebuilt interpreter for Python 3.13 on MacOSX in the repository. More
+prebuilts are available at [Autumn.cpp/Autumn.wasm repository](https://github.com/BasisResearch/Autumn.cpp/releases). Once downloaded, place the prebuilt file `interpreter_module.cpython-XXX-darwin.so` (for MacOS), into `python_examples/autumnbench/`. For
+any different versions, please follow the build guide of the repository. 
 
 ### Setting up environment variables
 Following this, please create an `.env` file following the `.env_sample`. This file is mostly used for providing credentials for LLM Agents.
